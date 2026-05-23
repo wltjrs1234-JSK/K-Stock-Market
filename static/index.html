@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K-Stock Dashboard</title>
+    <!-- Google Fonts (Outfit & Noto Sans KR) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Outfit:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    <!-- ApexCharts -->
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+</head>
+<body class="dark-theme">
+    
+    <!-- ==================== [일반 대시보드 모드] ==================== -->
+    <div id="dashboard-mode" class="app-container">
+        <!-- 상단 헤더 -->
+        <header class="main-header">
+            <div class="logo-area">
+                <i class="fa-solid fa-chart-line-up logo-icon"></i>
+                <h1>K-STOCK <span>LIVE</span></h1>
+            </div>
+            
+            <!-- 뉴스 롤링 배너 -->
+            <div class="news-ticker-container">
+                <div class="ticker-label">
+                    <i class="fa-solid fa-newspaper"></i> 실시간 뉴스
+                </div>
+                <div class="ticker-wrap">
+                    <div class="ticker" id="news-ticker">
+                        <!-- JS에서 뉴스 동적 주입 -->
+                        <span class="ticker-item">뉴스 로딩 중...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <span class="update-indicator" id="last-update-time">대기 중...</span>
+                <button id="btn-stealth-trigger" class="btn-stealth" title="스텔스 모드 전환 (VS Code 위장)">
+                    <i class="fa-solid fa-user-secret"></i> 스텔스 모드
+                </button>
+            </div>
+        </header>
+
+        <!-- 상단 경제 지표 (코스피, 코스닥, 환율, 나스닥, WTI 유가, 골드(달러)) -->
+        <section class="market-summary-section">
+            <!-- 코스피 -->
+            <div class="summary-card index-trigger-card" id="card-kospi" data-code="KOSPI" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">KOSPI</span>
+                    <i class="fa-solid fa-chart-line index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-kospi-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-kospi-change">-</span>
+                        <span class="index-rate" id="val-kospi-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- 코스닥 -->
+            <div class="summary-card index-trigger-card" id="card-kosdaq" data-code="KOSDAQ" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">KOSDAQ</span>
+                    <i class="fa-solid fa-chart-line index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-kosdaq-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-kosdaq-change">-</span>
+                        <span class="index-rate" id="val-kosdaq-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- 원달러 환율 -->
+            <div class="summary-card index-trigger-card" id="card-exchange" data-code="USDKRW" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">USD / KRW</span>
+                    <i class="fa-solid fa-dollar-sign index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-exchange-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-exchange-change">-</span>
+                        <span class="index-rate" id="val-exchange-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- 나스닥 -->
+            <div class="summary-card index-trigger-card" id="card-nasdaq" data-code="NASDAQ" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">NASDAQ</span>
+                    <i class="fa-solid fa-globe index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-nasdaq-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-nasdaq-change">-</span>
+                        <span class="index-rate" id="val-nasdaq-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- WTI 유가 -->
+            <div class="summary-card index-trigger-card" id="card-wti" data-code="OIL_CL" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">WTI 유가 (달러)</span>
+                    <i class="fa-solid fa-droplet index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-wti-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-wti-change">-</span>
+                        <span class="index-rate" id="val-wti-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- 국제 금 -->
+            <div class="summary-card index-trigger-card" id="card-gold" data-code="CMDT_GC" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">GOLD (달러)</span>
+                    <i class="fa-solid fa-coins index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-gold-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-gold-change">-</span>
+                        <span class="index-rate" id="val-gold-rate">-</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 메인 콘텐츠 영역 (관심종목 테이블 & 종목 상세) -->
+        <main class="main-content">
+            <!-- 상단 영역 (관심종목 테이블 100% 와이드) -->
+            <div class="main-content-top">
+                <!-- 왼쪽: 관심 종목 테이블 -->
+                <section class="watchlist-section" style="width: 100%;">
+                    <div class="section-header">
+                        <div class="section-title">
+                            <i class="fa-solid fa-star text-warning"></i>
+                            <h2>관심 종목</h2>
+                        </div>
+                        <form id="add-stock-form" class="add-stock-form" style="position: relative;">
+                            <input type="text" id="input-stock-code" placeholder="종목명 또는 코드 입력 (예: 삼성)" required autocomplete="off">
+                            <button type="submit" class="btn-add">
+                                <i class="fa-solid fa-plus"></i> 추가
+                            </button>
+                            <div id="autocomplete-list" class="autocomplete-dropdown hidden"></div>
+                        </form>
+                    </div>
+                    <div class="table-container">
+                        <table class="stock-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px; text-align: center;"></th>
+                                    <th>종목명</th>
+                                    <th>코드</th>
+                                    <th>현재가</th>
+                                    <th>전일대비</th>
+                                    <th>등락률</th>
+                                    <th>평단가</th>
+                                    <th>평단대비</th>
+                                    <th>거래량</th>
+                                    <th>관리</th>
+                                </tr>
+                            </thead>
+                            <tbody id="watchlist-tbody">
+                                <!-- JS에서 관심 종목 리스트 생성 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- 상하 크기 조절용 수평 스플리터 바 -->
+            <div class="layout-splitter" id="layout-splitter">
+                <div class="splitter-handle"></div>
+            </div>
+
+            <!-- 하단 영역 (좌측 3단 차트 보드 + 우측 상세/뉴스) -->
+            <div class="main-content-bottom">
+                <!-- 하단 좌측: 차트 보드 -->
+                <div class="bottom-left-wrapper" id="bottom-left-chart-wrapper">
+                    <div class="chart-board-card glass" id="chart-board-section" style="height: 100%;">
+                        <!-- MTS 모바일 상단 바 느낌의 헤더 -->
+                        <div class="mts-chart-header">
+                            <div class="mts-title-bar">
+                                <div class="left-actions">
+                                    <i class="fa-solid fa-chevron-left btn-back"></i>
+                                    <h2 id="chart-stock-title" class="mts-stock-name">종목 선택 필요</h2>
+                                    <i class="fa-solid fa-magnifying-glass btn-search-mts"></i>
+                                </div>
+                                <div class="right-actions">
+                                    <span class="mts-krx-badge">KRX</span>
+                                    <button class="btn-mts-order">주문</button>
+                                    <i class="fa-solid fa-ellipsis-vertical btn-more-mts"></i>
+                                </div>
+                            </div>
+                            
+                            <!-- 실시간 큼직한 시세 영역 -->
+                            <div class="mts-price-panel" id="mts-price-panel-area">
+                                <span class="mts-current-price" id="mts-price-val">-</span>
+                                <div class="mts-change-info">
+                                    <span class="mts-change-arrow" id="mts-arrow-val"></span>
+                                    <span class="mts-change-price" id="mts-change-val">-</span>
+                                    <span class="mts-change-rate" id="mts-rate-val">-</span>
+                                </div>
+                            </div>
+
+
+
+                            <!-- 일/분/틱 및 차트 도구 설정 바 -->
+                            <div class="mts-chart-toolbar">
+                                <div class="toolbar-left">
+                                    <span class="mts-tool-btn active">일 <i class="fa-solid fa-caret-down"></i></span>
+                                    <span class="mts-tool-btn">분 <i class="fa-solid fa-caret-down"></i></span>
+                                    <span class="mts-tool-btn">틱 <i class="fa-solid fa-caret-down"></i></span>
+                                </div>
+                                <div class="toolbar-right">
+                                    <span class="mts-indicator-toggle">ON</span>
+                                    <i class="fa-regular fa-copy"></i>
+                                    <i class="fa-solid fa-gear"></i>
+                                    <i class="fa-solid fa-wrench"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="stock-chart" class="stock-chart-container" style="position: relative; margin-top: 10px; border-radius: 8px; background: rgba(0,0,0,0.2);">
+                            <div id="chart-placeholder" class="chart-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--text-secondary); font-size: 0.85rem;">
+                                종목을 선택하면 일봉 차트(거래량/RSI 세로 분리)가 하단에 와이드 형태로 로드됩니다.
+                            </div>
+                            <div id="chart-panes-wrapper" class="hidden" style="width: 100%; display: flex; flex-direction: column; gap: 2px; padding: 4px;">
+                                <div id="chart-pane-candle" style="width: 100%; height: 380px; position: relative;"></div>
+                                <div id="chart-pane-volume" style="width: 100%; height: 180px; position: relative; border-top: 1px solid var(--border-color);"></div>
+                                <div id="chart-pane-rsi" style="width: 100%; height: 180px; position: relative; border-top: 1px solid var(--border-color);"></div>
+                                
+                                <!-- 과거 데이터 탐색용 가로 스크롤바 -->
+                                <div id="chart-scrollbar-area" class="chart-scrollbar-container">
+                                    <span class="date-label min-date" id="scrollbar-min-date">과거</span>
+                                    <input type="range" id="chart-timeline-slider" class="chart-range-slider" min="0" max="540" value="540">
+                                    <span class="date-label max-date" id="scrollbar-max-date">최신</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 좌우 크기 조절용 수직 스플리터 바 -->
+                <div class="layout-splitter-vertical" id="layout-splitter-vertical">
+                    <div class="splitter-handle-vertical"></div>
+                </div>
+
+                <!-- 하단 우측: 상세정보 및 뉴스 목록 -->
+                <div class="bottom-right-wrapper">
+                    <!-- 미니 종목 상세 정보 -->
+                    <div class="detail-card glass" id="detail-card-section">
+                        <div class="detail-card-header">
+                            <h3 id="detail-stock-name">종목을 선택하세요</h3>
+                            <span class="detail-code" id="detail-stock-code">-</span>
+                        </div>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <span class="label">현재가</span>
+                                <span class="value" id="detail-price">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="label">등락률</span>
+                                <span class="value" id="detail-rate">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="label">시가</span>
+                                <span class="value" id="detail-open">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="label">거래량</span>
+                                <span class="value" id="detail-volume">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="label">고가</span>
+                                <span class="value text-up" id="detail-high">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="label">저가</span>
+                                <span class="value text-down" id="detail-low">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 실시간 뉴스 보드 -->
+                    <div class="news-board-card glass">
+                        <div class="news-board-header">
+                            <h3><i class="fa-solid fa-fire text-danger"></i> 실시간 주요 뉴스</h3>
+                        </div>
+                        <ul class="news-list" id="news-board-list">
+                            <li class="news-item">뉴스를 불러오는 중입니다...</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+
+    <!-- ==================== [스텔스 모드: VS Code 위장] ==================== -->
+    <div id="stealth-mode" class="vscode-container hidden">
+        <!-- VS Code 사이드바 (액티비티 바) -->
+        <div class="vscode-activity-bar">
+            <div class="top-icons">
+                <div class="activity-icon active"><i class="fa-regular fa-copy"></i></div>
+                <div class="activity-icon"><i class="fa-solid fa-magnifying-glass"></i></div>
+                <div class="activity-icon"><i class="fa-solid fa-code-branch"></i></div>
+                <div class="activity-icon"><i class="fa-regular fa-square-caret-right"></i></div>
+                <div class="activity-icon"><i class="fa-solid fa-cubes"></i></div>
+            </div>
+            <div class="bottom-icons">
+                <div class="activity-icon"><i class="fa-regular fa-circle-user"></i></div>
+                <div class="activity-icon"><i class="fa-solid fa-gear"></i></div>
+            </div>
+        </div>
+
+        <!-- VS Code 사이드 파티션 (파일 탐색기) -->
+        <div class="vscode-sidebar">
+            <div class="sidebar-header">
+                <span>EXPLORER: STOCK_PROJECT</span>
+                <i class="fa-solid fa-ellipsis"></i>
+            </div>
+            <div class="sidebar-section">
+                <div class="section-title">
+                    <i class="fa-solid fa-chevron-down"></i>
+                    <span>STOCK_PROJECT</span>
+                </div>
+                <ul class="file-list">
+                    <li class="file-item"><i class="fa-brands fa-python text-python"></i> main.py</li>
+                    <li class="file-item active"><i class="fa-brands fa-js text-js"></i> app.js</li>
+                    <li class="file-item"><i class="fa-brands fa-html5 text-html"></i> index.html</li>
+                    <li class="file-item"><i class="fa-brands fa-css3-alt text-css"></i> style.css</li>
+                    <li class="file-item"><i class="fa-solid fa-gears"></i> config.json</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- VS Code 메인 코드 에디터 영역 -->
+        <div class="vscode-editor-area">
+            <!-- 에디터 탭 바 -->
+            <div class="editor-tabs">
+                <div class="tab"><i class="fa-brands fa-python text-python"></i> main.py</div>
+                <div class="tab active"><i class="fa-brands fa-js text-js"></i> app.js <span class="tab-close">×</span></div>
+                <div class="tab"><i class="fa-brands fa-html5 text-html"></i> index.html</div>
+                
+                <!-- 스텔스 해제 버튼 (VS Code 우측 상단 레이아웃 아이콘으로 위장) -->
+                <div class="editor-actions">
+                    <i class="fa-solid fa-table-columns" title="Split Editor"></i>
+                    <!-- 요 기어 모양 아이콘이 바로 스텔스를 복귀시키는 비밀 버튼 -->
+                    <i class="fa-solid fa-window-maximize btn-stealth-restore" id="btn-stealth-restore" title="Restore Layout (스텔스 해제)"></i>
+                    <i class="fa-solid fa-ellipsis-vertical"></i>
+                </div>
+            </div>
+
+            <!-- 코드 에디터 본문 -->
+            <div class="editor-content">
+                <div class="line-numbers">
+                    <!-- JS에서 행 번호 자동 생성 -->
+                </div>
+                <pre class="code-view"><code id="code-block">
+<span class="code-comment">// TODO: Implement real-time stock processing engine</span>
+<span class="code-keyword">const</span> <span class="code-def">stockEngine</span> = <span class="code-keyword">async</span> () => {
+    <span class="code-keyword">const</span> <span class="code-variable">watchlist</span> = [<span class="code-string">"삼성전자"</span>, <span class="code-string">"SK하이닉스"</span>];
+    <span class="code-keyword">try</span> {
+        <span class="code-keyword">const</span> <span class="code-variable">response</span> = <span class="code-keyword">await</span> fetch(<span class="code-string">'/api/market-summary'</span>);
+        <span class="code-keyword">const</span> <span class="code-variable">data</span> = <span class="code-keyword">await</span> response.json();
+        
+        <span class="code-comment">// -- LIVE MARKET TICKER DATA (REALTIME OVERLAY) --</span>
+        <span class="code-keyword">const</span> <span class="code-def">KOSPI</span> = <span class="code-number" id="stealth-kospi">-</span>; <span class="code-comment">// <span id="stealth-kospi-change" class="stealth-c">-</span></span>
+        <span class="code-keyword">const</span> <span class="code-def">KOSDAQ</span> = <span class="code-number" id="stealth-kosdaq">-</span>; <span class="code-comment">// <span id="stealth-kosdaq-change" class="stealth-c">-</span></span>
+        <span class="code-keyword">const</span> <span class="code-def">USDKRW</span> = <span class="code-number" id="stealth-exchange">-</span>; <span class="code-comment">// <span id="stealth-exchange-change" class="stealth-c">-</span></span>
+
+        <span class="code-comment">// -- WATCHED ITEMS VALUE OVERLAY --</span>
+        <span class="code-keyword">const</span> <span class="code-variable">activeStocks</span> = {
+            <span class="code-comment">// 위장 코드 내부에 실제 주식 데이터들이 아주 교묘하게 변수 값으로 표시됩니다!</span>
+            <span class="code-key">samsung_electronics</span>: <span class="code-number" id="stealth-stock-0">-</span>, <span class="code-comment">// <span id="stealth-stock-change-0" class="stealth-c">-</span></span>
+            <span class="code-key">sk_hynix</span>: <span class="code-number" id="stealth-stock-1">-</span>, <span class="code-comment">// <span id="stealth-stock-change-1" class="stealth-c">-</span></span>
+            <span class="code-key">custom_stock_1</span>: <span class="code-number" id="stealth-stock-2">-</span>, <span class="code-comment">// <span id="stealth-stock-change-2" class="stealth-c">-</span></span>
+            <span class="code-key">custom_stock_2</span>: <span class="code-number" id="stealth-stock-3">-</span>, <span class="code-comment">// <span id="stealth-stock-change-3" class="stealth-c">-</span></span>
+            <span class="code-key">custom_stock_3</span>: <span class="code-number" id="stealth-stock-4">-</span>  <span class="code-comment">// <span id="stealth-stock-change-4" class="stealth-c">-</span></span>
+        };
+
+        <span class="code-comment">// -- TECHNICAL INDICATOR CORRELATION (RSI) --</span>
+        <span class="code-keyword">const</span> <span class="code-variable">technicalIndicators</span> = {
+            rsi_status: <span class="code-string" id="stealth-rsi-status">"NEUTRAL"</span>, <span class="code-comment">// Value: <span id="stealth-rsi-value" class="stealth-c">-</span></span>
+            macd_signal: <span class="code-string" id="stealth-macd-status">"HOLD"</span>    <span class="code-comment">// Hist: <span id="stealth-macd-value" class="stealth-c">-</span></span>
+        };
+        
+        console.log(<span class="code-string">"Market State: Connected"</span>);
+    } <span class="code-keyword">catch</span> (err) {
+        console.error(<span class="code-string">"Engine failure:"</span>, err);
+    }
+};
+
+<span class="code-comment">// Run engine task</span>
+setInterval(stockEngine, <span class="code-number">3000</span>);
+                </code></pre>
+            </div>
+
+            <!-- 하단 터미널 및 상태바 -->
+            <div class="vscode-terminal-area">
+                <div class="terminal-tabs">
+                    <div class="terminal-tab">PROBLEMS</div>
+                    <div class="terminal-tab">OUTPUT</div>
+                    <div class="terminal-tab">DEBUG CONSOLE</div>
+                    <div class="terminal-tab active">TERMINAL</div>
+                </div>
+                <div class="terminal-content">
+                    <span class="terminal-prompt">PS C:\Users\김지석\Desktop\Antigravity\실시간 국장></span>
+                    <span class="terminal-text" id="stealth-news-line">uvicorn main:app --reload (최신 뉴스 로딩 중...)</span>
+                </div>
+            </div>
+
+            <div class="vscode-status-bar">
+                <div class="status-left">
+                    <span class="status-item"><i class="fa-solid fa-code-branch"></i> main</span>
+                    <span class="status-item"><i class="fa-solid fa-arrows-rotate"></i> Syncing...</span>
+                </div>
+                <div class="status-right">
+                    <span class="status-item">Ln 14, Col 32</span>
+                    <span class="status-item">Spaces: 4</span>
+                    <span class="status-item">UTF-8</span>
+                    <span class="status-item">Javascript</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 스크립트 로드 -->
+    <script src="app.js"></script>
+</body>
+</html>
