@@ -1557,6 +1557,19 @@ tr.drag-over {
     color: var(--text-primary) !important;
 }
 
+.stock-table td.text-up {
+    color: var(--color-up) !important;
+}
+
+.stock-table td.text-down {
+    color: var(--color-down) !important;
+}
+
+.stock-table td.text-same {
+    color: var(--color-same) !important;
+}
+
+
 .stock-table tbody tr:hover {
     background: #f8fafc !important;
 }

@@ -19,35 +19,78 @@ let volumeChart = null;
 let rsiChart = null;
 let isDraggingWatchlist = false; // 관심종목 드래그 정렬 시 폴링 일시중단용 플래그
 
-// 로컬스토리지 로드 및 구버전 데이터 마이그레이션
-if (localStorage.getItem('watchlist')) {
+// 서버로부터 관심종목 데이터 불러오기 (비동기)
+async function loadWatchlistFromServer() {
     try {
-        const raw = JSON.parse(localStorage.getItem('watchlist'));
-        if (Array.isArray(raw) && raw.length > 0) {
-            watchlist = raw.map(item => {
-                if (typeof item === 'string') {
-                    return { code: item, avgPrice: 0 };
-                } else if (item && typeof item === 'object' && item.code) {
-                    return { code: item.code, avgPrice: Number(item.avgPrice) || 0 };
+        const res = await fetch('/api/watchlist');
+        if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data) && data.length > 0) {
+                watchlist = data;
+                // 로컬스토리지 백업
+                localStorage.setItem('watchlist', JSON.stringify(watchlist));
+                
+                // 첫 번째 종목 코드 설정
+                if (watchlist.length > 0 && !selectedStockCode) {
+                    selectedStockCode = watchlist[0].code;
                 }
-                return null;
-            }).filter(Boolean);
-            
-            if (watchlist.length > 0) {
-                selectedStockCode = watchlist[0].code;
+                return;
             }
         }
     } catch (e) {
-        console.error("관심종목 로드 에러:", e);
+        console.error("서버에서 관심종목 로드 실패, 로컬스토리지 시도:", e);
+    }
+    
+    // 서버 조회 실패 혹은 데이터가 빌 경우 로컬스토리지에서 복구 시도
+    if (localStorage.getItem('watchlist')) {
+        try {
+            const raw = JSON.parse(localStorage.getItem('watchlist'));
+            if (Array.isArray(raw) && raw.length > 0) {
+                watchlist = raw.map(item => {
+                    if (typeof item === 'string') {
+                        return { code: item, avgPrice: 0 };
+                    } else if (item && typeof item === 'object' && item.code) {
+                        return { code: item.code, avgPrice: Number(item.avgPrice) || 0 };
+                    }
+                    return null;
+                }).filter(Boolean);
+                
+                if (watchlist.length > 0 && !selectedStockCode) {
+                    selectedStockCode = watchlist[0].code;
+                }
+            }
+        } catch (e) {
+            console.error("로컬 관심종목 로드 에러:", e);
+        }
     }
 }
+
+// 서버로 관심종목 데이터 전송 및 저장
+async function saveWatchlistToServer() {
+    try {
+        // 로컬스토리지 백업
+        localStorage.setItem('watchlist', JSON.stringify(watchlist));
+        
+        await fetch('/api/watchlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(watchlist)
+        });
+    } catch (e) {
+        console.error("서버로 관심종목 저장 실패:", e);
+    }
+}
+
 
 // ==========================================================================
 // [2. 이벤트 바인딩 & 초기화]
 // ==========================================================================
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // 1. VS Code 행 번호 동적 생성
     generateLineNumbers();
+
+    // 1.1 서버로부터 관심종목 리스트 및 평단가 동기화
+    await loadWatchlistFromServer();
 
     // 2. 초기 데이터 즉시 갱신
     updateMarketSummary();
@@ -492,7 +535,7 @@ async function addStockToWatchlist(code) {
         }
         
         watchlist.push({ code, avgPrice: 0 });
-        localStorage.setItem('watchlist', JSON.stringify(watchlist));
+        await saveWatchlistToServer();
         selectedStockCode = code; 
         updateWatchlistData();
         updateStockChart(code);
@@ -504,7 +547,7 @@ async function addStockToWatchlist(code) {
 // 관심 종목에서 삭제
 function removeStockFromWatchlist(code) {
     watchlist = watchlist.filter(w => w.code !== code);
-    localStorage.setItem('watchlist', JSON.stringify(watchlist));
+    saveWatchlistToServer();
     
     if (selectedStockCode === code) {
         selectedStockCode = watchlist.length > 0 ? watchlist[0].code : '';
@@ -569,7 +612,7 @@ function updateAveragePrice(code, price) {
     const idx = watchlist.findIndex(w => w.code === code);
     if (idx !== -1) {
         watchlist[idx].avgPrice = price;
-        localStorage.setItem('watchlist', JSON.stringify(watchlist));
+        saveWatchlistToServer();
         isEditingAvgPrice = false; // 플래그 최종 보장 해제
         updateWatchlistData();
         // 평단가가 갱신되면 차트의 평단가 선도 즉시 갱신
@@ -1395,8 +1438,28 @@ function clearStockCharts() {
     if (titleEl) titleEl.innerText = "종목 선택 필요";
 }
 
-// 스텔스 모드 보조지표 동기화
+// 스텔스 모드 및 실제 UI 보조지표 동기화
 function updateStealthIndicators(lastItem) {
+    // 실제 UI 주가 패널의 RSI 값 실시간 동기화
+    const detailRsiEl = document.getElementById('detail-rsi');
+    if (detailRsiEl) {
+        if (lastItem && lastItem.rsi !== null && lastItem.rsi !== undefined) {
+            const rsi = lastItem.rsi;
+            detailRsiEl.innerText = rsi.toFixed(2);
+            detailRsiEl.className = 'value'; // 기본 클래스
+            if (rsi >= 70) {
+                detailRsiEl.classList.add('text-up');
+            } else if (rsi <= 30) {
+                detailRsiEl.classList.add('text-down');
+            } else {
+                detailRsiEl.classList.add('text-same');
+            }
+        } else {
+            detailRsiEl.innerText = '-';
+            detailRsiEl.className = 'value text-same';
+        }
+    }
+
     const rsiValEl = document.getElementById('stealth-rsi-value');
     const rsiStatusEl = document.getElementById('stealth-rsi-status');
     const macdValEl = document.getElementById('stealth-macd-value');
@@ -1511,7 +1574,7 @@ function reorderWatchlistFromDOM() {
     
     if (newWatchlist.length > 0) {
         watchlist = newWatchlist;
-        localStorage.setItem('watchlist', JSON.stringify(watchlist));
+        saveWatchlistToServer();
     }
 }
 

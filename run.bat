@@ -1,35 +1,43 @@
 @echo off
-chcp 65001 > nul
-title K-Stock-Market 실행 중...
+pushd "%~dp0"
 
-echo.
-echo  ========================================
-echo    K-Stock-Market 주식 대시보드 시작
-echo  ========================================
-echo.
+echo ========================================
+echo K-Stock-Market Server Starting...
+echo ========================================
 
-:: 현재 폴더로 이동
-cd /d "%~dp0"
+:: Kill existing python processes to avoid port conflict
+taskkill /F /IM python.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
 
-:: 가상환경 존재 여부 확인 후 활성화
+:: Check virtual environment
 if exist "venv\Scripts\activate.bat" (
-    echo  [1/2] 가상환경 활성화 중...
+    echo [1/3] Activating virtual environment...
     call venv\Scripts\activate.bat
 ) else (
-    echo  [!] 가상환경 없음 - 시스템 Python 사용
+    echo [1/3] Warning: venv not found. Using system Python...
 )
 
-echo  [2/2] 서버 시작 중...
-echo.
-echo  브라우저 주소: http://127.0.0.1:8080
-echo.
-echo  종료하려면 이 창을 닫거나 Ctrl+C 를 누르세요.
-echo.
+:: Install dependencies
+echo [2/3] Checking dependencies...
+python -m pip install -r requirements.txt -q
 
-:: 1초 후 브라우저 자동 열기
-start /b cmd /c "timeout /t 2 > nul && start chrome http://127.0.0.1:8080"
+:: Find Google Chrome path (Avoid using parenthesis in IF blocks)
+set CHROME_PATH=
+if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe"
+if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME_PATH=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" set "CHROME_PATH=%LocalAppData%\Google\Chrome\Application\chrome.exe"
 
-:: 서버 실행
+:: Launch Chrome or default browser after 3 seconds delay using PowerShell to avoid cmd quote issues
+echo [3/3] Launching Chrome in 3 seconds...
+if defined CHROME_PATH (
+    start /B powershell -WindowStyle Hidden -Command "Start-Sleep -Seconds 3; Start-Process '%CHROME_PATH%' -ArgumentList 'http://127.0.0.1:8080'"
+) else (
+    start /B powershell -WindowStyle Hidden -Command "Start-Sleep -Seconds 3; Start-Process 'http://127.0.0.1:8080'"
+)
+
+:: Run uvicorn server in foreground
+echo Server running at http://127.0.0.1:8080
 python -m uvicorn main:app --host 127.0.0.1 --port 8080
 
+popd
 pause

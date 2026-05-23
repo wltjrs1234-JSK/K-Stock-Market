@@ -5,6 +5,7 @@ import os
 import re
 import datetime
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import requests
@@ -41,6 +42,43 @@ CACHE_EXPIRE_SECONDS = 2  # 캐시 유효 시간: 2초
 STOCKS_FILE = "stocks.json"
 STOCKS_LIST = []  # [{"code": "005930", "name": "삼성전자"}, ...]
 STOCKS_LOCK = threading.Lock()
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WATCHLIST_FILE = os.path.join(BASE_DIR, "watchlist.json")
+
+class WatchlistItem(BaseModel):
+    code: str
+    avgPrice: float
+
+
+def load_watchlist():
+    if os.path.exists(WATCHLIST_FILE):
+        try:
+            with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception as e:
+            print("Failed to load watchlist.json:", e)
+    
+    # 기본값
+    default_watchlist = [
+        {"code": "005930", "avgPrice": 0},
+        {"code": "000660", "avgPrice": 0},
+        {"code": "005380", "avgPrice": 0},
+        {"code": "035720", "avgPrice": 0},
+        {"code": "035420", "avgPrice": 0}
+    ]
+    save_watchlist(default_watchlist)
+    return default_watchlist
+
+def save_watchlist(data):
+    try:
+        with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("Failed to save watchlist.json:", e)
+
 
 def get_chosung(text: str) -> str:
     chosung = []
@@ -526,6 +564,17 @@ def search_stocks(q: str = ""):
                 if len(results) >= 10:
                     break
     return results
+
+@app.get("/api/watchlist")
+def get_watchlist():
+    return load_watchlist()
+
+@app.post("/api/watchlist")
+def update_watchlist(data: list[WatchlistItem]):
+    watchlist_dict = [item.dict() for item in data]
+    save_watchlist(watchlist_dict)
+    return {"status": "success"}
+
 
 @app.get("/api/market-summary")
 def get_market_summary():
