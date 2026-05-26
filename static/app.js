@@ -1,17 +1,24 @@
 // ==========================================================================
 // [1. 상태 관리 및 설정]
 // ==========================================================================
-let watchlist = [
-    { code: '005930', avgPrice: 0 },
-    { code: '000660', avgPrice: 0 },
-    { code: '005380', avgPrice: 0 },
-    { code: '035720', avgPrice: 0 },
-    { code: '035420', avgPrice: 0 }
-]; // 기본값: 삼성전자, SK하이닉스, 현대차, 카카오, NAVER
+let watchlist = {
+    accounts: [
+        {
+            id: 'default_acc',
+            name: '기본 계좌',
+            watchlist: [
+                { code: '005930', avgPrice: 0, quantity: 0 },
+                { code: '000660', avgPrice: 0, quantity: 0 }
+            ]
+        }
+    ]
+};
+let currentAccountId = 'default_acc'; // 현재 활성화된 계좌 ID
 let selectedStockCode = '005930'; // 현재 디테일 뷰에 활성화된 종목
 let previousPrices = {}; // 가격 변동 감지용 이전 가격 캐시
 const UPDATE_INTERVAL = 3000; // 3초 주기 폴링
 let isEditingAvgPrice = false; // 평단가 수정 중 폴링 리렌더링 방지 플래그
+let isEditingQuantity = false; // 보유수량 수정 중 폴링 리렌더링 방지 플래그
 
 // ApexCharts 인스턴스 관리용 글로벌 객체
 let candleChart = null;
@@ -25,15 +32,21 @@ async function loadWatchlistFromServer() {
         const res = await fetch('/api/watchlist');
         if (res.ok) {
             const data = await res.json();
-            if (Array.isArray(data) && data.length > 0) {
-                watchlist = data;
-                // 로컬스토리지 백업
-                localStorage.setItem('watchlist', JSON.stringify(watchlist));
-                
-                // 첫 번째 종목 코드 설정
-                if (watchlist.length > 0 && !selectedStockCode) {
-                    selectedStockCode = watchlist[0].code;
+            if (data && typeof data === 'object') {
+                if (data.accounts && Array.isArray(data.accounts)) {
+                    watchlist = data;
+                } else if (Array.isArray(data)) {
+                    // 예전 리스트 형태 마이그레이션
+                    watchlist = {
+                        accounts: [{
+                            id: 'default_acc',
+                            name: '기본 계좌',
+                            watchlist: data
+                        }]
+                    };
                 }
+                localStorage.setItem('watchlist', JSON.stringify(watchlist));
+                initializeCurrentAccount();
                 return;
             }
         }
@@ -41,23 +54,24 @@ async function loadWatchlistFromServer() {
         console.error("서버에서 관심종목 로드 실패, 로컬스토리지 시도:", e);
     }
     
-    // 서버 조회 실패 혹은 데이터가 빌 경우 로컬스토리지에서 복구 시도
-    if (localStorage.getItem('watchlist')) {
+    // 로컬스토리지에서 복구 시도
+    const stored = localStorage.getItem('watchlist');
+    if (stored) {
         try {
-            const raw = JSON.parse(localStorage.getItem('watchlist'));
-            if (Array.isArray(raw) && raw.length > 0) {
-                watchlist = raw.map(item => {
-                    if (typeof item === 'string') {
-                        return { code: item, avgPrice: 0 };
-                    } else if (item && typeof item === 'object' && item.code) {
-                        return { code: item.code, avgPrice: Number(item.avgPrice) || 0 };
-                    }
-                    return null;
-                }).filter(Boolean);
-                
-                if (watchlist.length > 0 && !selectedStockCode) {
-                    selectedStockCode = watchlist[0].code;
+            const parsed = JSON.parse(stored);
+            if (parsed && typeof parsed === 'object') {
+                if (parsed.accounts && Array.isArray(parsed.accounts)) {
+                    watchlist = parsed;
+                } else if (Array.isArray(parsed)) {
+                    watchlist = {
+                        accounts: [{
+                            id: 'default_acc',
+                            name: '기본 계좌',
+                            watchlist: parsed
+                        }]
+                    };
                 }
+                initializeCurrentAccount();
             }
         } catch (e) {
             console.error("로컬 관심종목 로드 에러:", e);
@@ -65,10 +79,26 @@ async function loadWatchlistFromServer() {
     }
 }
 
+// 현재 활성화된 계좌 설정 및 초기 선택종목 바인딩
+function initializeCurrentAccount() {
+    if (watchlist.accounts && watchlist.accounts.length > 0) {
+        // 기존에 선택했던 계좌가 없거나 현재 목록에 없다면 첫 번째 계좌 선택
+        const exists = watchlist.accounts.some(acc => acc.id === currentAccountId);
+        if (!exists) {
+            currentAccountId = watchlist.accounts[0].id;
+        }
+        
+        // 첫 번째 계좌의 첫 번째 종목 코드 설정
+        const activeAcc = watchlist.accounts.find(acc => acc.id === currentAccountId);
+        if (activeAcc && activeAcc.watchlist.length > 0 && !selectedStockCode) {
+            selectedStockCode = activeAcc.watchlist[0].code;
+        }
+    }
+}
+
 // 서버로 관심종목 데이터 전송 및 저장
 async function saveWatchlistToServer() {
     try {
-        // 로컬스토리지 백업
         localStorage.setItem('watchlist', JSON.stringify(watchlist));
         
         await fetch('/api/watchlist', {
@@ -78,6 +108,131 @@ async function saveWatchlistToServer() {
         });
     } catch (e) {
         console.error("서버로 관심종목 저장 실패:", e);
+    }
+}
+
+// 다중 계좌 탭 렌더링
+function renderAccountTabs() {
+    const tabsContainer = document.getElementById('account-tabs-list');
+    const nameDisplay = document.getElementById('current-account-display-name');
+    if (!tabsContainer) return;
+    
+    tabsContainer.innerHTML = '';
+    
+    if (!watchlist.accounts || watchlist.accounts.length === 0) {
+        watchlist.accounts = [{ id: 'default_acc', name: '기본 계좌', watchlist: [] }];
+    }
+    
+    watchlist.accounts.forEach(acc => {
+        const tab = document.createElement('div');
+        tab.className = `account-tab ${acc.id === currentAccountId ? 'active' : ''}`;
+        tab.setAttribute('data-id', acc.id);
+        
+        tab.innerHTML = `<i class="fa-solid fa-folder"></i> ${acc.name}`;
+        
+        tab.addEventListener('click', () => {
+            if (currentAccountId === acc.id) return;
+            currentAccountId = acc.id;
+            
+            // 탭 스타일 변경
+            document.querySelectorAll('.account-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            
+            if (nameDisplay) {
+                nameDisplay.innerText = acc.name;
+            }
+            
+            // 선택된 계좌의 첫 종목이 있다면 차트 갱신
+            if (acc.watchlist.length > 0) {
+                selectedStockCode = acc.watchlist[0].code;
+                updateStockChart(selectedStockCode);
+            } else {
+                selectedStockCode = '';
+                clearStockCharts();
+            }
+            
+            updateWatchlistData();
+        });
+        
+        tabsContainer.appendChild(tab);
+    });
+    
+    // 현재 활성화된 계좌명 헤더 연동
+    const activeAcc = watchlist.accounts.find(acc => acc.id === currentAccountId);
+    if (activeAcc && nameDisplay) {
+        nameDisplay.innerText = activeAcc.name;
+    }
+}
+
+// 계좌 액션 이벤트 바인딩
+function initAccountEvents() {
+    const addBtn = document.getElementById('btn-add-account');
+    const renameBtn = document.getElementById('btn-rename-account');
+    const delBtn = document.getElementById('btn-delete-account');
+    
+    if (addBtn) {
+        addBtn.addEventListener('click', () => {
+            const accName = prompt('추가할 계좌의 이름을 입력해 주세요:');
+            if (accName && accName.trim()) {
+                const newId = 'acc_' + Date.now();
+                watchlist.accounts.push({
+                    id: newId,
+                    name: accName.trim(),
+                    watchlist: []
+                });
+                currentAccountId = newId;
+                saveWatchlistToServer();
+                renderAccountTabs();
+                selectedStockCode = '';
+                clearStockCharts();
+                updateWatchlistData();
+            }
+        });
+    }
+    
+    if (renameBtn) {
+        renameBtn.addEventListener('click', () => {
+            const activeAcc = watchlist.accounts.find(acc => acc.id === currentAccountId);
+            if (!activeAcc) return;
+            
+            const newName = prompt('변경할 계좌 이름을 입력해 주세요:', activeAcc.name);
+            if (newName && newName.trim() && newName.trim() !== activeAcc.name) {
+                activeAcc.name = newName.trim();
+                saveWatchlistToServer();
+                renderAccountTabs();
+            }
+        });
+    }
+    
+    if (delBtn) {
+        delBtn.addEventListener('click', () => {
+            if (watchlist.accounts.length <= 1) {
+                alert('최소한 1개의 계좌는 유지되어야 합니다.');
+                return;
+            }
+            
+            const activeAcc = watchlist.accounts.find(acc => acc.id === currentAccountId);
+            if (!activeAcc) return;
+            
+            if (confirm(`정말로 "${activeAcc.name}" 계좌를 삭제하시겠습니까?\n계좌 내 관심종목 데이터가 모두 유실됩니다.`)) {
+                watchlist.accounts = watchlist.accounts.filter(acc => acc.id !== currentAccountId);
+                currentAccountId = watchlist.accounts[0].id;
+                
+                // 삭제 후 첫 번째 계좌의 첫 종목으로 차트 갱신
+                const firstAcc = watchlist.accounts[0];
+                if (firstAcc.watchlist.length > 0) {
+                    selectedStockCode = firstAcc.watchlist[0].code;
+                    updateStockChart(selectedStockCode);
+                } else {
+                    selectedStockCode = '';
+                    clearStockCharts();
+                }
+                
+                saveWatchlistToServer();
+                renderAccountTabs();
+                updateWatchlistData();
+            }
+        });
     }
 }
 
@@ -91,6 +246,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 1.1 서버로부터 관심종목 리스트 및 평단가 동기화
     await loadWatchlistFromServer();
+
+    // 1.2 계좌 관리 탭 바인딩 및 렌더링
+    renderAccountTabs();
+    initAccountEvents();
 
     // 2. 초기 데이터 즉시 갱신
     updateMarketSummary();
@@ -122,7 +281,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 3. 주기적 타이머 시작 (3초)
     setInterval(() => {
         updateMarketSummary();
-        if (!isEditingAvgPrice && !isDraggingWatchlist) {
+        if (!isEditingAvgPrice && !isEditingQuantity && !isDraggingWatchlist) {
             updateWatchlistData();
         }
     }, UPDATE_INTERVAL);
@@ -394,20 +553,44 @@ function updateStealthIndex(idPrefix, itemData) {
 }
 
 // 4.2 관심종목 데이터 업데이트
+// 소수점 4자리 지원 수량 포맷팅 헬퍼
+function formatQuantity(qty) {
+    if (qty === 0) return '클릭하여 입력';
+    return Number(qty).toLocaleString(undefined, { 
+        minimumFractionDigits: 0, 
+        maximumFractionDigits: 4 
+    });
+}
+
 // 4.2 관심종목 데이터 업데이트
 async function updateWatchlistData() {
     const tbody = document.getElementById('watchlist-tbody');
-    const promises = watchlist.map(item => fetch(`/api/stock/${item.code}`).then(r => r.json()).catch(() => null));
+    
+    // 1. 모든 계좌 내의 고유 종목 코드를 수집하여 한 번에 실시간 가격 조회
+    const allCodes = new Set();
+    if (watchlist.accounts && Array.isArray(watchlist.accounts)) {
+        watchlist.accounts.forEach(acc => {
+            if (acc.watchlist && Array.isArray(acc.watchlist)) {
+                acc.watchlist.forEach(item => allCodes.add(item.code));
+            }
+        });
+    }
+    if (selectedStockCode) {
+        allCodes.add(selectedStockCode);
+    }
+    
+    const promises = Array.from(allCodes).map(code => 
+        fetch(`/api/stock/${code}`).then(r => r.json()).catch(() => null)
+    );
     
     try {
         const results = await Promise.all(promises);
         
-        // 종목 상세 뷰 정보 갱신 (선택된 종목이 있을 경우)
+        // 2. 종목 상세 뷰 정보 갱신 (선택된 종목이 있을 경우)
         let selectedStock = results.find(s => s && s.code === selectedStockCode);
         if (selectedStock) {
             renderStockDetails(selectedStock);
         } else if (['KOSPI', 'KOSDAQ', 'NASDAQ', 'USDKRW', 'OIL_CL', 'CMDT_GC'].includes(selectedStockCode)) {
-            // 지수 정보 단독 조회 후 렌더링
             fetch(`/api/stock/${selectedStockCode}`)
                 .then(r => r.json())
                 .then(stockData => {
@@ -416,9 +599,21 @@ async function updateWatchlistData() {
                 .catch(err => console.error("Index detail fetch error:", err));
         }
 
-        // 관심 종목 목록 테이블 렌더링
+        // 3. 현재 활성화된 계좌의 관심 종목 필터링 및 테이블 렌더링
         tbody.innerHTML = '';
-        results.forEach((stock, idx) => {
+        const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+        const activeWatchlist = activeAcc ? activeAcc.watchlist : [];
+        
+        // 현재 계좌의 종목들에 해당하는 최신가 결과만 정렬하여 추출
+        const activeResults = [];
+        activeWatchlist.forEach(item => {
+            const stockData = results.find(s => s && s.code === item.code);
+            if (stockData) {
+                activeResults.push(stockData);
+            }
+        });
+
+        activeResults.forEach((stock, idx) => {
             if (!stock) return;
             
             const tr = document.createElement('tr');
@@ -445,9 +640,10 @@ async function updateWatchlistData() {
             }
             previousPrices[stock.code] = stock.price;
 
-            // 평단가 정보 매핑
-            const watchItem = watchlist.find(w => w.code === stock.code);
+            // 현재 계좌의 평단가 및 보유 수량 정보 매핑
+            const watchItem = activeWatchlist.find(w => w.code === stock.code);
             const avgPrice = watchItem ? watchItem.avgPrice : 0;
+            const quantity = watchItem ? (watchItem.quantity || 0) : 0;
             const currentPriceNum = parseFloat(stock.price.replace(/,/g, ''));
             
             let profitRateText = '-';
@@ -459,6 +655,8 @@ async function updateWatchlistData() {
                 profitClass = profitRate > 0 ? 'text-up' : profitRate < 0 ? 'text-down' : 'text-same';
             }
 
+            const evalPrice = quantity > 0 ? currentPriceNum * quantity : 0;
+
             tr.innerHTML = `
                 <td class="drag-handle"><i class="fa-solid fa-grip-lines"></i></td>
                 <td><strong>${stock.name}</strong></td>
@@ -468,6 +666,12 @@ async function updateWatchlistData() {
                 <td class="stock-change-wrap ${statusClass}">${stock.status === 'UP' ? '+' : ''}${stock.rate}%</td>
                 <td class="avg-price-cell" data-code="${stock.code}" data-value="${avgPrice}">
                     ${avgPrice > 0 ? avgPrice.toLocaleString() : '클릭하여 입력'}
+                </td>
+                <td class="quantity-cell" data-code="${stock.code}" data-value="${quantity}">
+                    ${formatQuantity(quantity)}
+                </td>
+                <td class="eval-price-cell font-outfit">
+                    ${evalPrice > 0 ? Math.round(evalPrice).toLocaleString() : '-'}
                 </td>
                 <td class="profit-rate-cell ${profitClass}">${profitRateText}</td>
                 <td class="text-same">${stock.volume.toLocaleString()}</td>
@@ -480,7 +684,7 @@ async function updateWatchlistData() {
 
             // 클릭 시 디테일 및 차트 활성화
             tr.addEventListener('click', (e) => {
-                if (e.target.closest('.btn-delete') || e.target.closest('.avg-price-cell') || e.target.closest('.drag-handle')) return;
+                if (e.target.closest('.btn-delete') || e.target.closest('.avg-price-cell') || e.target.closest('.quantity-cell') || e.target.closest('.drag-handle')) return;
                 
                 selectedStockCode = stock.code;
                 updateWatchlistData(); 
@@ -511,19 +715,26 @@ async function updateWatchlistData() {
             }
         });
 
-        // 인라인 평단가 에디터 바인딩
+        // 4. 포트폴리오 자산 요약 실시간 계산 및 렌더링 (전체 조회 결과 results 활용)
+        updatePortfolioSummary(results);
+
+        // 5. 인라인 평단가 및 수량 에디터 바인딩
         bindAvgPriceEditor();
+        bindQuantityEditor();
 
     } catch (e) {
         console.error("관심종목 갱신 오류:", e);
     }
 }
 
-// 관심 종목에 새로 추가
+// 관심 종목에 새로 추가 (현재 선택된 계좌의 관심종목에 추가)
 async function addStockToWatchlist(code) {
-    const codes = watchlist.map(w => w.code);
+    const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+    if (!activeAcc) return;
+    
+    const codes = activeAcc.watchlist.map(w => w.code);
     if (codes.includes(code)) {
-        alert('이미 감시 목록에 등록되어 있는 종목 코드입니다.');
+        alert('이미 현재 계좌의 관심 목록에 등록되어 있는 종목 코드입니다.');
         return;
     }
     
@@ -534,7 +745,7 @@ async function addStockToWatchlist(code) {
             return;
         }
         
-        watchlist.push({ code, avgPrice: 0 });
+        activeAcc.watchlist.push({ code, avgPrice: 0.0, quantity: 0.0 });
         await saveWatchlistToServer();
         selectedStockCode = code; 
         updateWatchlistData();
@@ -546,11 +757,14 @@ async function addStockToWatchlist(code) {
 
 // 관심 종목에서 삭제
 function removeStockFromWatchlist(code) {
-    watchlist = watchlist.filter(w => w.code !== code);
+    const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+    if (!activeAcc) return;
+
+    activeAcc.watchlist = activeAcc.watchlist.filter(w => w.code !== code);
     saveWatchlistToServer();
     
     if (selectedStockCode === code) {
-        selectedStockCode = watchlist.length > 0 ? watchlist[0].code : '';
+        selectedStockCode = activeAcc.watchlist.length > 0 ? activeAcc.watchlist[0].code : '';
     }
     
     updateWatchlistData();
@@ -568,7 +782,6 @@ function bindAvgPriceEditor() {
         cell.addEventListener('click', (e) => {
             if (cell.querySelector('input')) return;
             
-            // 입력창 활성화 시 폴링 강제 리렌더링 중지
             isEditingAvgPrice = true;
             
             const code = cell.getAttribute('data-code');
@@ -587,9 +800,9 @@ function bindAvgPriceEditor() {
             const saveValue = () => {
                 if (isSaved) return;
                 isSaved = true;
-                const newVal = Math.max(0, parseInt(input.value) || 0);
+                const newVal = Math.max(0, parseFloat(input.value) || 0.0);
                 updateAveragePrice(code, newVal);
-                isEditingAvgPrice = false; // 플래그 해제
+                isEditingAvgPrice = false;
             };
             
             input.addEventListener('keydown', (evt) => {
@@ -597,7 +810,7 @@ function bindAvgPriceEditor() {
                     saveValue();
                 } else if (evt.key === 'Escape') {
                     isSaved = true;
-                    isEditingAvgPrice = false; // 플래그 해제
+                    isEditingAvgPrice = false;
                     updateWatchlistData(); 
                 }
             });
@@ -609,15 +822,195 @@ function bindAvgPriceEditor() {
 
 // 평단가 정보 갱신
 function updateAveragePrice(code, price) {
-    const idx = watchlist.findIndex(w => w.code === code);
+    const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+    if (!activeAcc) return;
+    
+    const idx = activeAcc.watchlist.findIndex(w => w.code === code);
     if (idx !== -1) {
-        watchlist[idx].avgPrice = price;
+        activeAcc.watchlist[idx].avgPrice = price;
         saveWatchlistToServer();
-        isEditingAvgPrice = false; // 플래그 최종 보장 해제
+        isEditingAvgPrice = false; 
         updateWatchlistData();
-        // 평단가가 갱신되면 차트의 평단가 선도 즉시 갱신
         if (selectedStockCode === code) {
             updateStockChart(code);
+        }
+    }
+}
+
+// 수량 인라인 에디팅 바인딩 (소수점 4째자리 지원)
+function bindQuantityEditor() {
+    const cells = document.querySelectorAll('.quantity-cell');
+    cells.forEach(cell => {
+        cell.addEventListener('click', (e) => {
+            if (cell.querySelector('input')) return;
+            
+            isEditingQuantity = true;
+            
+            const code = cell.getAttribute('data-code');
+            const currentVal = cell.getAttribute('data-value');
+            
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = '0.0001'; // 소수점 4자리 설정
+            input.className = 'quantity-input';
+            input.value = currentVal === '0' ? '' : currentVal;
+            
+            cell.innerHTML = '';
+            cell.appendChild(input);
+            input.focus();
+            
+            let isSaved = false;
+            const saveValue = () => {
+                if (isSaved) return;
+                isSaved = true;
+                const newVal = Math.max(0, parseFloat(input.value) || 0.0);
+                updateQuantity(code, newVal);
+                isEditingQuantity = false;
+            };
+            
+            input.addEventListener('keydown', (evt) => {
+                if (evt.key === 'Enter') {
+                    saveValue();
+                } else if (evt.key === 'Escape') {
+                    isSaved = true;
+                    isEditingQuantity = false;
+                    updateWatchlistData(); 
+                }
+            });
+            
+            input.addEventListener('blur', saveValue);
+        });
+    });
+}
+
+// 보유 수량 정보 갱신
+function updateQuantity(code, qty) {
+    const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+    if (!activeAcc) return;
+
+    const idx = activeAcc.watchlist.findIndex(w => w.code === code);
+    if (idx !== -1) {
+        activeAcc.watchlist[idx].quantity = qty;
+        saveWatchlistToServer();
+        isEditingQuantity = false;
+        updateWatchlistData();
+    }
+}
+
+// 포트폴리오 전체 요약 실시간 연동 (현재 계좌 & 전체 계좌 통합 연동)
+function updatePortfolioSummary(results) {
+    // 1. 현재 계좌의 요약 합계 연산
+    let currentEval = 0;
+    let currentPurchase = 0;
+    
+    const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+    const activeWatchlist = activeAcc ? activeAcc.watchlist : [];
+    
+    activeWatchlist.forEach(item => {
+        const stock = results.find(s => s && s.code === item.code);
+        if (stock) {
+            const quantity = item.quantity || 0;
+            const avgPrice = item.avgPrice || 0;
+            const currentPriceNum = parseFloat(stock.price.replace(/,/g, '')) || 0;
+            
+            if (quantity > 0) {
+                currentEval += currentPriceNum * quantity;
+                currentPurchase += avgPrice * quantity;
+            }
+        }
+    });
+
+    const totalAssetEl = document.getElementById('portfolio-total-asset');
+    const totalPurchaseEl = document.getElementById('portfolio-total-purchase');
+    const totalProfitEl = document.getElementById('portfolio-total-profit');
+    const totalRateEl = document.getElementById('portfolio-total-rate');
+
+    if (totalAssetEl && totalPurchaseEl && totalProfitEl && totalRateEl) {
+        if (currentPurchase === 0 && currentEval === 0) {
+            totalAssetEl.innerText = '0 원';
+            totalPurchaseEl.innerText = '0 원';
+            totalProfitEl.innerText = '0 원';
+            totalRateEl.innerText = '0.00%';
+            totalProfitEl.className = 'summary-value text-same';
+            totalRateEl.className = 'summary-value text-same';
+        } else {
+            const currentNetProfit = currentEval - currentPurchase;
+            const currentProfitRate = currentPurchase > 0 ? (currentNetProfit / currentPurchase) * 100 : 0;
+            
+            totalAssetEl.innerText = `${Math.round(currentEval).toLocaleString()} 원`;
+            totalPurchaseEl.innerText = `${Math.round(currentPurchase).toLocaleString()} 원`;
+            totalProfitEl.innerText = `${currentNetProfit > 0 ? '+' : ''}${Math.round(currentNetProfit).toLocaleString()} 원`;
+            totalRateEl.innerText = `${currentProfitRate > 0 ? '+' : ''}${currentProfitRate.toFixed(2)}%`;
+            
+            if (currentNetProfit > 0) {
+                totalProfitEl.className = 'summary-value text-up';
+                totalRateEl.className = 'summary-value text-up';
+            } else if (currentNetProfit < 0) {
+                totalProfitEl.className = 'summary-value text-down';
+                totalRateEl.className = 'summary-value text-down';
+            } else {
+                totalProfitEl.className = 'summary-value text-same';
+                totalRateEl.className = 'summary-value text-same';
+            }
+        }
+    }
+
+    // 2. 전체 계좌 종합 합계 연산
+    let combinedEval = 0;
+    let combinedPurchase = 0;
+    
+    if (watchlist.accounts && Array.isArray(watchlist.accounts)) {
+        watchlist.accounts.forEach(acc => {
+            if (acc.watchlist && Array.isArray(acc.watchlist)) {
+                acc.watchlist.forEach(item => {
+                    const stock = results.find(s => s && s.code === item.code);
+                    if (stock) {
+                        const quantity = item.quantity || 0;
+                        const avgPrice = item.avgPrice || 0;
+                        const currentPriceNum = parseFloat(stock.price.replace(/,/g, '')) || 0;
+                        
+                        if (quantity > 0) {
+                            combinedEval += currentPriceNum * quantity;
+                            combinedPurchase += avgPrice * quantity;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    const combAssetEl = document.getElementById('combined-total-asset');
+    const combPurchaseEl = document.getElementById('combined-total-purchase');
+    const combProfitEl = document.getElementById('combined-total-profit');
+    const combRateEl = document.getElementById('combined-total-rate');
+
+    if (combAssetEl && combPurchaseEl && combProfitEl && combRateEl) {
+        if (combinedPurchase === 0 && combinedEval === 0) {
+            combAssetEl.innerText = '0 원';
+            combPurchaseEl.innerText = '0 원';
+            combProfitEl.innerText = '0 원';
+            combRateEl.innerText = '0.00%';
+            combProfitEl.className = 'summary-value text-same';
+            combRateEl.className = 'summary-value text-same';
+        } else {
+            const combinedNetProfit = combinedEval - combinedPurchase;
+            const combinedProfitRate = combinedPurchase > 0 ? (combinedNetProfit / combinedPurchase) * 100 : 0;
+            
+            combAssetEl.innerText = `${Math.round(combinedEval).toLocaleString()} 원`;
+            combPurchaseEl.innerText = `${Math.round(combinedPurchase).toLocaleString()} 원`;
+            combProfitEl.innerText = `${combinedNetProfit > 0 ? '+' : ''}${Math.round(combinedNetProfit).toLocaleString()} 원`;
+            combRateEl.innerText = `${combinedProfitRate > 0 ? '+' : ''}${combinedProfitRate.toFixed(2)}%`;
+            
+            if (combinedNetProfit > 0) {
+                combProfitEl.className = 'summary-value text-up';
+                combRateEl.className = 'summary-value text-up';
+            } else if (combinedNetProfit < 0) {
+                combProfitEl.className = 'summary-value text-down';
+                combRateEl.className = 'summary-value text-down';
+            } else {
+                combProfitEl.className = 'summary-value text-same';
+                combRateEl.className = 'summary-value text-same';
+            }
         }
     }
 }
@@ -1069,8 +1462,9 @@ async function renderChartsActual(chartData, stockName, code) {
         // 최신 종목 정보 조회 (현재가 및 등락률 축 어노테이션용)
         const currentStock = await fetch(`/api/stock/${code}`).then(r => r.json()).catch(() => null);
         
-        // 해당 종목의 평단가 조회
-        const watchItem = watchlist.find(w => w.code === code);
+        // 현재 활성화된 계좌 내에서 해당 종목의 평단가 조회
+        const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+        const watchItem = activeAcc ? activeAcc.watchlist.find(w => w.code === code) : null;
         const avgPrice = watchItem ? watchItem.avgPrice : 0;
 
         // MTS용 동적 어노테이션 로드
@@ -1558,6 +1952,9 @@ function bindDragAndDropEvents(tr) {
 }
 
 function reorderWatchlistFromDOM() {
+    const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+    if (!activeAcc) return;
+    
     const tbody = document.getElementById('watchlist-tbody');
     const rows = tbody.querySelectorAll('tr');
     const newWatchlist = [];
@@ -1565,7 +1962,7 @@ function reorderWatchlistFromDOM() {
     rows.forEach(row => {
         const code = row.getAttribute('data-code');
         if (code) {
-            const existingItem = watchlist.find(item => item.code === code);
+            const existingItem = activeAcc.watchlist.find(item => item.code === code);
             if (existingItem) {
                 newWatchlist.push(existingItem);
             }
@@ -1573,7 +1970,7 @@ function reorderWatchlistFromDOM() {
     });
     
     if (newWatchlist.length > 0) {
-        watchlist = newWatchlist;
+        activeAcc.watchlist = newWatchlist;
         saveWatchlistToServer();
     }
 }

@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Outfit:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/style.css">
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 </head>
@@ -134,13 +134,86 @@
             </div>
         </section>
 
+        <!-- 나의 자산 및 포트폴리오 요약 패널 (현재 계좌 vs 전체 종합 2단 구성) -->
+        <section class="portfolio-summary-section glass-container">
+            <div class="portfolio-split-grid">
+                <!-- 좌측: 현재 선택된 계좌 요약 -->
+                <div class="portfolio-card current-account-card glass">
+                    <div class="portfolio-summary-title">
+                        <i class="fa-solid fa-wallet summary-icon"></i>
+                        <h2>선택 계좌 자산 요약 (<span id="current-account-display-name">기본 계좌</span>)</h2>
+                    </div>
+                    <div class="portfolio-summary-grid">
+                        <div class="summary-item">
+                            <span class="summary-label">평가 금액</span>
+                            <span class="summary-value" id="portfolio-total-asset">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">매수 금액</span>
+                            <span class="summary-value" id="portfolio-total-purchase">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">평가 손익</span>
+                            <span class="summary-value" id="portfolio-total-profit">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">수익률</span>
+                            <span class="summary-value" id="portfolio-total-rate">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 우측: 모든 계좌 종합 요약 합계 -->
+                <div class="portfolio-card total-combined-card glass">
+                    <div class="portfolio-summary-title">
+                        <i class="fa-solid fa-chart-pie summary-icon"></i>
+                        <h2>전체 계좌 종합 합계</h2>
+                    </div>
+                    <div class="portfolio-summary-grid">
+                        <div class="summary-item">
+                            <span class="summary-label">총 평가 금액</span>
+                            <span class="summary-value" id="combined-total-asset">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">총 매수 금액</span>
+                            <span class="summary-value" id="combined-total-purchase">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">총 평가 손익</span>
+                            <span class="summary-value" id="combined-total-profit">-</span>
+                        </div>
+                        <div class="summary-item">
+                            <span class="summary-label">종합 수익률</span>
+                            <span class="summary-value" id="combined-total-rate">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- 메인 콘텐츠 영역 (관심종목 테이블 & 종목 상세) -->
         <main class="main-content">
             <!-- 상단 영역 (관심종목 테이블 100% 와이드) -->
             <div class="main-content-top">
                 <!-- 왼쪽: 관심 종목 테이블 -->
                 <section class="watchlist-section" style="width: 100%;">
-                    <div class="section-header">
+                    <div class="account-control-row">
+                        <div class="account-tabs" id="account-tabs-list">
+                            <!-- JS에서 계좌 탭 동적 생성 -->
+                        </div>
+                        <div class="account-actions">
+                            <button type="button" class="btn-account-action btn-add-acc" id="btn-add-account">
+                                <i class="fa-solid fa-folder-plus"></i> 계좌 추가
+                            </button>
+                            <button type="button" class="btn-account-action btn-rename-acc" id="btn-rename-account">
+                                <i class="fa-solid fa-pen"></i> 이름 변경
+                            </button>
+                            <button type="button" class="btn-account-action btn-del-acc" id="btn-delete-account">
+                                <i class="fa-solid fa-folder-minus"></i> 계좌 삭제
+                            </button>
+                        </div>
+                    </div>
+                    <div class="section-header" style="margin-top: 15px;">
                         <div class="section-title">
                             <i class="fa-solid fa-star text-warning"></i>
                             <h2>관심 종목</h2>
@@ -164,6 +237,8 @@
                                     <th>전일대비</th>
                                     <th>등락률</th>
                                     <th>평단가</th>
+                                    <th>보유 수량</th>
+                                    <th>평가 금액</th>
                                     <th>평단대비</th>
                                     <th>거래량</th>
                                     <th>관리</th>
@@ -439,6 +514,6 @@ setInterval(stockEngine, <span class="code-number">3000</span>);
     </div>
 
     <!-- 스크립트 로드 -->
-    <script src="app.js?v=2.0.0"></script>
+    <script src="/app.js?v=2.0.0"></script>
 </body>
 </html>

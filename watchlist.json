@@ -1,6 +1,60 @@
-[
-  {
-    "code": "069500",
-    "avgPrice": 96000.0
-  }
-]
+{
+  "accounts": [
+    {
+      "id": "default_acc",
+      "name": "Default Account",
+      "watchlist": [
+        {
+          "code": "069500",
+          "avgPrice": 96454.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "091160",
+          "avgPrice": 151899.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "449450",
+          "avgPrice": 70885.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "360200",
+          "avgPrice": 22062.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "367380",
+          "avgPrice": 23557.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "466940",
+          "avgPrice": 15459.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "319640",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "005930",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "000660",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        }
+      ]
+    },
+    {
+      "id": "overseas_acc",
+      "name": "Overseas Stocks",
+      "watchlist": []
+    }
+  ]
+}

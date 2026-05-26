@@ -11,6 +11,27 @@ from fastapi.staticfiles import StaticFiles
 import requests
 from bs4 import BeautifulSoup
 import uvicorn
+import urllib3
+
+# SSL 인증서 검증 경고 비활성화 및 requests 몽키 패치
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+original_get = requests.get
+def patched_get(*args, **kwargs):
+    kwargs['verify'] = False
+    return original_get(*args, **kwargs)
+requests.get = patched_get
+
+def safe_float(val, default=0.0):
+    try:
+        return float(val) if val else default
+    except (ValueError, TypeError):
+        return default
+
+def safe_int(val, default=0):
+    try:
+        return int(val) if val else default
+    except (ValueError, TypeError):
+        return default
 
 CHOSUNG_LIST = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ']
 
@@ -49,28 +70,81 @@ WATCHLIST_FILE = os.path.join(BASE_DIR, "watchlist.json")
 class WatchlistItem(BaseModel):
     code: str
     avgPrice: float
+    quantity: float = 0.0  # 소수점 4자리 지원을 위해 float으로 수정
+
+class Account(BaseModel):
+    id: str
+    name: str
+    watchlist: list[WatchlistItem] = []
+
+class WatchlistData(BaseModel):
+    accounts: list[Account] = []
 
 
 def load_watchlist():
     if os.path.exists(WATCHLIST_FILE):
         try:
             with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    return data
+                raw_data = json.load(f)
+                
+                # 하위 호환성 마이그레이션: 기존 단일 관심종목 목록을 "기본 계좌"로 래핑
+                if isinstance(raw_data, list):
+                    migrated_watchlist = []
+                    for item in raw_data:
+                        if isinstance(item, dict):
+                            migrated_watchlist.append({
+                                "code": item.get("code", ""),
+                                "avgPrice": float(item.get("avgPrice", 0.0)),
+                                "quantity": float(item.get("quantity", 0.0))
+                            })
+                    migrated_data = {
+                        "accounts": [
+                            {
+                                "id": "default_acc",
+                                "name": "기본 계좌",
+                                "watchlist": migrated_watchlist
+                            }
+                        ]
+                    }
+                    save_watchlist(migrated_data)
+                    return migrated_data
+                
+                elif isinstance(raw_data, dict) and "accounts" in raw_data:
+                    # 각 계좌 및 아이템 정보 정규화
+                    accounts = []
+                    for acc in raw_data.get("accounts", []):
+                        wl = []
+                        for item in acc.get("watchlist", []):
+                            wl.append({
+                                "code": item.get("code", ""),
+                                "avgPrice": float(item.get("avgPrice", 0.0)),
+                                "quantity": float(item.get("quantity", 0.0))
+                            })
+                        accounts.append({
+                            "id": acc.get("id", "default_acc"),
+                            "name": acc.get("name", "미지정 계좌"),
+                            "watchlist": wl
+                        })
+                    return {"accounts": accounts}
         except Exception as e:
             print("Failed to load watchlist.json:", e)
     
     # 기본값
-    default_watchlist = [
-        {"code": "005930", "avgPrice": 0},
-        {"code": "000660", "avgPrice": 0},
-        {"code": "005380", "avgPrice": 0},
-        {"code": "035720", "avgPrice": 0},
-        {"code": "035420", "avgPrice": 0}
-    ]
-    save_watchlist(default_watchlist)
-    return default_watchlist
+    default_data = {
+        "accounts": [
+            {
+                "id": "default_acc",
+                "name": "기본 계좌",
+                "watchlist": [
+                    {"code": "005930", "avgPrice": 0.0, "quantity": 0.0},
+                    {"code": "000660", "avgPrice": 0.0, "quantity": 0.0},
+                    {"code": "360200", "avgPrice": 0.0, "quantity": 0.0}
+                ]
+            }
+        ]
+    }
+    save_watchlist(default_data)
+    return default_data
 
 def save_watchlist(data):
     try:
@@ -238,12 +312,13 @@ def fetch_market_summary():
     indices = {}
     for item in index_data.get('datas', []):
         code = item.get('itemCode')  # KOSPI / KOSDAQ
+        fluctuations_ratio = safe_float(item.get('fluctuationsRatio', 0))
         indices[code] = {
             "name": item.get('stockName'),
             "price": item.get('closePrice'),
             "change": item.get('compareToPreviousClosePrice'),
             "rate": item.get('fluctuationsRatio'),
-            "status": "UP" if float(item.get('fluctuationsRatio', 0)) > 0 else "DOWN" if float(item.get('fluctuationsRatio', 0)) < 0 else "SAME"
+            "status": "UP" if fluctuations_ratio > 0 else "DOWN" if fluctuations_ratio < 0 else "SAME"
         }
         
     # 2. 환율 (원달러 - marketindex API)
@@ -254,7 +329,7 @@ def fetch_market_summary():
     exchange_rate = "0.00"
     exchange_status = "SAME"
     try:
-        ex_ratio = float(ex_data.get('fluctuationsRatio', 0))
+        ex_ratio = safe_float(ex_data.get('fluctuationsRatio', 0))
         exchange_rate = f"{ex_ratio:.2f}"
         exchange_status = "UP" if ex_ratio > 0 else "DOWN" if ex_ratio < 0 else "SAME"
     except Exception:
@@ -273,7 +348,7 @@ def fetch_market_summary():
         nasdaq_url = 'https://api.stock.naver.com/index/.IXIC/basic'
         nas_res = requests.get(nasdaq_url, headers=HEADERS, timeout=5)
         nas_data = nas_res.json() if nas_res.status_code == 200 else {}
-        nas_ratio = float(nas_data.get('fluctuationsRatio', 0))
+        nas_ratio = safe_float(nas_data.get('fluctuationsRatio', 0))
         nasdaq = {
             "name": "NASDAQ",
             "price": nas_data.get('closePrice'),
@@ -389,7 +464,7 @@ def fetch_stock_price(code: str):
         index_data = index_res.json() if index_res.status_code == 200 else {}
         for item in index_data.get('datas', []):
             if item.get('itemCode') == code:
-                ratio = float(item.get('fluctuationsRatio', 0))
+                ratio = safe_float(item.get('fluctuationsRatio', 0))
                 return {
                     "code": code,
                     "name": item.get('stockName'),
@@ -408,7 +483,7 @@ def fetch_stock_price(code: str):
         nasdaq_url = 'https://api.stock.naver.com/index/.IXIC/basic'
         nas_res = requests.get(nasdaq_url, headers=HEADERS, timeout=5)
         nas_data = nas_res.json() if nas_res.status_code == 200 else {}
-        ratio = float(nas_data.get('fluctuationsRatio', 0))
+        ratio = safe_float(nas_data.get('fluctuationsRatio', 0))
         return {
             "code": "NASDAQ",
             "name": "NASDAQ",
@@ -427,7 +502,7 @@ def fetch_stock_price(code: str):
         exchange_url = 'https://api.stock.naver.com/marketindex/exchange/FX_USDKRW'
         ex_res = requests.get(exchange_url, headers=HEADERS, timeout=5)
         ex_data = ex_res.json().get('exchangeInfo', {}) if ex_res.status_code == 200 else {}
-        ratio = float(ex_data.get('fluctuationsRatio', 0))
+        ratio = safe_float(ex_data.get('fluctuationsRatio', 0))
         return {
             "code": "USDKRW",
             "name": "원달러 환율",
@@ -491,7 +566,7 @@ def fetch_stock_price(code: str):
         raise HTTPException(status_code=404, detail="해당 종목 코드를 찾을 수 없습니다.")
     
     stock_info = datas_list[0]
-        
+    fluctuations_ratio = safe_float(stock_info.get('fluctuationsRatio', 0))
     return {
         "code": code,
         "name": stock_info.get('stockName'),
@@ -501,9 +576,9 @@ def fetch_stock_price(code: str):
         "high": stock_info.get('highPrice'),
         "low": stock_info.get('lowPrice'),
         "open": stock_info.get('openPrice'),
-        "volume": int(stock_info.get('accumulatedTradingVolumeRaw', 0)),
+        "volume": safe_int(stock_info.get('accumulatedTradingVolumeRaw', 0)),
         "prev_close": stock_info.get('previousClosePrice'),
-        "status": "UP" if float(stock_info.get('fluctuationsRatio', 0)) > 0 else "DOWN" if float(stock_info.get('fluctuationsRatio', 0)) < 0 else "SAME"
+        "status": "UP" if fluctuations_ratio > 0 else "DOWN" if fluctuations_ratio < 0 else "SAME"
     }
 
 def fetch_news():
@@ -570,9 +645,8 @@ def get_watchlist():
     return load_watchlist()
 
 @app.post("/api/watchlist")
-def update_watchlist(data: list[WatchlistItem]):
-    watchlist_dict = [item.dict() for item in data]
-    save_watchlist(watchlist_dict)
+def update_watchlist(data: WatchlistData):
+    save_watchlist(data.dict())
     return {"status": "success"}
 
 

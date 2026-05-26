@@ -2010,4 +2010,216 @@ tr.drag-over {
     background-color: #1e1e1e !important;
 }
 
+/* ==========================================================================
+   [9. 나의 포트폴리오 요약 및 계좌 관리 스타일]
+   ========================================================================== */
+.portfolio-summary-section {
+    margin-bottom: 20px;
+}
+
+.portfolio-split-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    width: 100%;
+}
+
+@media (max-width: 1024px) {
+    .portfolio-split-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.portfolio-card {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    padding: 20px 25px !important;
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.06) !important;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.03) !important;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.portfolio-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(15, 23, 42, 0.06) !important;
+}
+
+.portfolio-summary-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.portfolio-summary-title h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #0f172a !important;
+}
+
+.summary-icon {
+    font-size: 1.2rem;
+    color: #0f172a;
+}
+
+.portfolio-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.summary-item {
+    background: #f8fafc !important;
+    border: 1px solid rgba(0, 0, 0, 0.02) !important;
+    border-radius: 12px;
+    padding: 12px 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: background 0.2s;
+}
+
+.summary-item:hover {
+    background: #f1f5f9 !important;
+}
+
+.summary-label {
+    font-size: 0.75rem;
+    color: #64748b;
+    font-weight: 500;
+}
+
+.summary-value {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #0f172a;
+    transition: color 0.2s;
+}
+
+/* 계좌 컨트롤 탭 관련 스타일 */
+.account-control-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f8fafc !important;
+    border: 1px solid rgba(0, 0, 0, 0.05) !important;
+    border-radius: 14px;
+    padding: 10px 15px;
+    gap: 15px;
+    margin-bottom: 5px;
+}
+
+.account-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.account-tab {
+    cursor: pointer;
+    padding: 8px 16px;
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    color: #64748b !important;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: 10px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    user-select: none;
+}
+
+.account-tab:hover {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+}
+
+.account-tab.active {
+    background: #0f172a !important;
+    color: #ffffff !important;
+    border-color: #0f172a !important;
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.15) !important;
+}
+
+.account-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.btn-account-action {
+    cursor: pointer;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.2s ease;
+}
+
+.btn-add-acc {
+    background: #f1f5f9 !important;
+    border-color: rgba(0, 0, 0, 0.06) !important;
+    color: #0f172a !important;
+}
+.btn-add-acc:hover {
+    background: #e2e8f0 !important;
+}
+
+.btn-rename-acc {
+    background: #ffffff !important;
+    border-color: rgba(0, 0, 0, 0.08) !important;
+    color: #475569 !important;
+}
+.btn-rename-acc:hover {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+}
+
+.btn-del-acc {
+    background: #fee2e2 !important;
+    color: #ef4444 !important;
+    border-color: transparent !important;
+}
+.btn-del-acc:hover {
+    background: #fecaca !important;
+}
+
+/* 수량 인라인 에디터 관련 스타일 */
+.quantity-cell {
+    cursor: pointer;
+    font-family: 'Outfit', sans-serif;
+    transition: background 0.2s;
+    position: relative;
+}
+
+.quantity-cell:hover {
+    background: rgba(0, 0, 0, 0.03) !important;
+    border-radius: 4px;
+}
+
+.quantity-input {
+    width: 90%;
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.1) !important;
+    color: #0f172a !important;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.85rem;
+    font-family: 'Outfit', sans-serif;
+    outline: none;
+    text-align: left;
+}
+
+.quantity-input:focus {
+    border-color: #0f172a !important;
+}
+
 
