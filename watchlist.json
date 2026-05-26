@@ -2,58 +2,124 @@
   "accounts": [
     {
       "id": "default_acc",
-      "name": "Default Account",
+      "name": "ISA계좌",
       "watchlist": [
         {
           "code": "069500",
           "avgPrice": 96454.0,
-          "quantity": 0.0
-        },
-        {
-          "code": "091160",
-          "avgPrice": 151899.0,
-          "quantity": 0.0
-        },
-        {
-          "code": "449450",
-          "avgPrice": 70885.0,
-          "quantity": 0.0
+          "quantity": 59.0
         },
         {
           "code": "360200",
           "avgPrice": 22062.0,
-          "quantity": 0.0
+          "quantity": 305.0
+        },
+        {
+          "code": "360750",
+          "avgPrice": 18528.0,
+          "quantity": 256.0
         },
         {
           "code": "367380",
           "avgPrice": 23557.0,
-          "quantity": 0.0
+          "quantity": 233.0
+        },
+        {
+          "code": "133690",
+          "avgPrice": 107900.0,
+          "quantity": 1.0
         },
         {
           "code": "466940",
           "avgPrice": 15459.0,
-          "quantity": 0.0
+          "quantity": 66.0
         },
         {
           "code": "319640",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 21606.0,
+          "quantity": 186.0
         },
         {
-          "code": "005930",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "code": "465580",
+          "avgPrice": 19108.0,
+          "quantity": 82.0
         },
         {
-          "code": "000660",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "code": "458730",
+          "avgPrice": 12411.0,
+          "quantity": 74.0
+        },
+        {
+          "code": "489250",
+          "avgPrice": 10667.0,
+          "quantity": 44.0
         }
       ]
     },
     {
       "id": "overseas_acc",
-      "name": "Overseas Stocks",
+      "name": "연금저축계좌",
+      "watchlist": [
+        {
+          "code": "466940",
+          "avgPrice": 17381.0,
+          "quantity": 101.0
+        },
+        {
+          "code": "458730",
+          "avgPrice": 11633.0,
+          "quantity": 105.0
+        },
+        {
+          "code": "069500",
+          "avgPrice": 114496.0,
+          "quantity": 19.0
+        },
+        {
+          "code": "360200",
+          "avgPrice": 23045.0,
+          "quantity": 34.0
+        },
+        {
+          "code": "441640",
+          "avgPrice": 12013.0,
+          "quantity": 105.0
+        },
+        {
+          "code": "091160",
+          "avgPrice": 151899.0,
+          "quantity": 7.0
+        },
+        {
+          "code": "489250",
+          "avgPrice": 10909.0,
+          "quantity": 22.0
+        },
+        {
+          "code": "319640",
+          "avgPrice": 25286.0,
+          "quantity": 30.0
+        },
+        {
+          "code": "458760",
+          "avgPrice": 10373.0,
+          "quantity": 34.0
+        },
+        {
+          "code": "360750",
+          "avgPrice": 20874.0,
+          "quantity": 4.0
+        },
+        {
+          "code": "411060",
+          "avgPrice": 32050.0,
+          "quantity": 2.0
+        }
+      ]
+    },
+    {
+      "id": "acc_1779783900656",
+      "name": "직투계좌",
       "watchlist": []
     }
   ]
