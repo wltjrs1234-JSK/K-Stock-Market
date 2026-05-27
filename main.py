@@ -661,7 +661,7 @@ VALID_INDICES = ["KOSPI", "KOSDAQ", "USDKRW", "NASDAQ", "OIL_CL", "CMDT_GC"]
 
 @app.get("/api/stock/{code}")
 def get_stock(code: str):
-    if code not in VALID_INDICES and (not code.isdigit() or len(code) != 6):
+    if code not in VALID_INDICES and (not code.isalnum() or len(code) != 6):
         raise HTTPException(status_code=400, detail="유효한 6자리 종목 코드 또는 지수명을 입력해주세요.")
     try:
         return get_cached_or_fetch(f"stock_{code}", lambda: fetch_stock_price(code))
@@ -881,7 +881,7 @@ def fetch_stock_chart(code: str):
 
 @app.get("/api/stock/{code}/chart")
 def get_stock_chart(code: str):
-    if code not in VALID_INDICES and (not code.isdigit() or len(code) != 6):
+    if code not in VALID_INDICES and (not code.isalnum() or len(code) != 6):
         raise HTTPException(status_code=400, detail="유효한 6자리 종목 코드 또는 지수명을 입력해주세요.")
     try:
         return get_cached_or_fetch(f"chart_{code}", lambda: fetch_stock_chart(code))

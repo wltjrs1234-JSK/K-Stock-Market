@@ -410,8 +410,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.preventDefault();
         const query = codeInput.value.trim();
         
-        // 6자리 숫자 코드이면 바로 추가
-        if (query.length === 6 && /^\d+$/.test(query)) {
+        // 6자리 숫자/영문 코드이면 바로 추가
+        if (query.length === 6 && /^[a-zA-Z0-9]+$/.test(query)) {
             addStockToWatchlist(query);
             codeInput.value = '';
             closeAutocomplete();

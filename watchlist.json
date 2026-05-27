@@ -53,6 +53,11 @@
           "code": "489250",
           "avgPrice": 10667.0,
           "quantity": 44.0
+        },
+        {
+          "code": "0183J0",
+          "avgPrice": 0.0,
+          "quantity": 0.0
         }
       ]
     },
@@ -121,6 +126,17 @@
       "id": "acc_1779783900656",
       "name": "직투계좌",
       "watchlist": []
+    },
+    {
+      "id": "acc_1779838316725",
+      "name": "관심ETF",
+      "watchlist": [
+        {
+          "code": "0183J0",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        }
+      ]
     }
   ]
 }

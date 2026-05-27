@@ -82,6 +82,7 @@ body {
     gap: 20px;
     max-width: 1600px;
     margin: 0 auto;
+    overflow-y: auto; /* enable scrolling beyond bottom */
 }
 
 /* 헤더 영역 */
