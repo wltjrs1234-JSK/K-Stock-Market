@@ -410,9 +410,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         e.preventDefault();
         const query = codeInput.value.trim();
         
-        // 6자리 숫자/영문 코드이면 바로 추가
-        if (query.length === 6 && /^[a-zA-Z0-9]+$/.test(query)) {
-            addStockToWatchlist(query);
+        // 1~15자리 국내 종목 코드 또는 해외 주식 티커이면 바로 추가
+        if (query.length >= 1 && query.length <= 15 && /^[a-zA-Z0-9.\-]+$/.test(query)) {
+            addStockToWatchlist(query.toUpperCase());
             codeInput.value = '';
             closeAutocomplete();
         } else {

@@ -517,6 +517,134 @@ def fetch_stock_price(code: str):
             "status": "UP" if ratio > 0 else "DOWN" if ratio < 0 else "SAME"
         }
         
+def fetch_us_stock_price(ticker: str):
+    # 야후 파이낸스 chart API를 통해 실시간 시세 및 이전 종가 정보 획득 (401 방지)
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker.upper()}?interval=1d&range=2d"
+    yahoo_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    res = requests.get(url, headers=yahoo_headers, timeout=5)
+    if res.status_code != 200:
+        raise HTTPException(status_code=404, detail="해외 종목 정보를 가져올 수 없습니다.")
+    
+    data = res.json()
+    result_list = data.get('chart', {}).get('result', [])
+    if not result_list:
+        raise HTTPException(status_code=404, detail="해당 해외 종목 코드를 찾을 수 없습니다.")
+    
+    meta = result_list[0].get('meta', {})
+    
+    price = meta.get('regularMarketPrice', 0.0)
+    prev_close = meta.get('chartPreviousClose', price)
+    if prev_close is None:
+        prev_close = price
+        
+    change = price - prev_close
+    rate = (change / prev_close * 100) if prev_close > 0 else 0.0
+    
+    if price % 1 != 0:
+        price_str = f"{price:,.2f}"
+    else:
+        price_str = f"{int(price):,}"
+        
+    if change % 1 != 0:
+        change_str = f"{abs(change):,.2f}"
+    else:
+        change_str = f"{int(abs(change)):,}"
+        
+    volume = meta.get('regularMarketVolume', 0)
+    status = "UP" if change > 0 else "DOWN" if change < 0 else "SAME"
+    
+    high_val = meta.get('regularMarketDayHigh', price)
+    low_val = meta.get('regularMarketDayLow', price)
+    open_val = meta.get('regularMarketDayOpen', price)
+    if open_val is None:
+        open_val = price
+    if high_val is None:
+        high_val = price
+    if low_val is None:
+        low_val = price
+        
+    high_str = f"{high_val:,.2f}" if high_val % 1 != 0 else f"{int(high_val):,}"
+    low_str = f"{low_val:,.2f}" if low_val % 1 != 0 else f"{int(low_val):,}"
+    open_str = f"{open_val:,.2f}" if open_val % 1 != 0 else f"{int(open_val):,}"
+    
+    name = meta.get('longName') or meta.get('shortName') or ticker.upper()
+    
+    return {
+        "code": ticker.upper(),
+        "name": name,
+        "price": price_str,
+        "change": change_str,
+        "rate": f"{rate:.2f}",
+        "high": high_str,
+        "low": low_str,
+        "open": open_str,
+        "volume": volume,
+        "prev_close": prev_close,
+        "status": status
+    }
+
+
+def fetch_stock_price(code: str):
+    # 지수 및 환율, 원자재에 대한 분기 처리
+    if code in ["KOSPI", "KOSDAQ"]:
+        index_url = 'https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI,KOSDAQ'
+        index_res = requests.get(index_url, headers=HEADERS, timeout=5)
+        index_data = index_res.json() if index_res.status_code == 200 else {}
+        for item in index_data.get('datas', []):
+            if item.get('itemCode') == code:
+                ratio = safe_float(item.get('fluctuationsRatio', 0))
+                return {
+                    "code": code,
+                    "name": item.get('stockName'),
+                    "price": item.get('closePrice'),
+                    "change": item.get('compareToPreviousClosePrice'),
+                    "rate": item.get('fluctuationsRatio'),
+                    "high": item.get('closePrice'),
+                    "low": item.get('closePrice'),
+                    "open": item.get('closePrice'),
+                    "volume": 0,
+                    "prev_close": item.get('closePrice'),
+                    "status": "UP" if ratio > 0 else "DOWN" if ratio < 0 else "SAME"
+                }
+                
+    elif code == "NASDAQ":
+        nasdaq_url = 'https://api.stock.naver.com/index/.IXIC/basic'
+        nas_res = requests.get(nasdaq_url, headers=HEADERS, timeout=5)
+        nas_data = nas_res.json() if nas_res.status_code == 200 else {}
+        ratio = safe_float(nas_data.get('fluctuationsRatio', 0))
+        return {
+            "code": "NASDAQ",
+            "name": "NASDAQ",
+            "price": nas_data.get('closePrice'),
+            "change": nas_data.get('compareToPreviousClosePrice'),
+            "rate": f"{ratio:.2f}",
+            "high": nas_data.get('closePrice'),
+            "low": nas_data.get('closePrice'),
+            "open": nas_data.get('closePrice'),
+            "volume": 0,
+            "prev_close": nas_data.get('closePrice'),
+            "status": "UP" if ratio > 0 else "DOWN" if ratio < 0 else "SAME"
+        }
+        
+    elif code == "USDKRW":
+        exchange_url = 'https://api.stock.naver.com/marketindex/exchange/FX_USDKRW'
+        ex_res = requests.get(exchange_url, headers=HEADERS, timeout=5)
+        ex_data = ex_res.json().get('exchangeInfo', {}) if ex_res.status_code == 200 else {}
+        ratio = safe_float(ex_data.get('fluctuationsRatio', 0))
+        return {
+            "code": "USDKRW",
+            "name": "원달러 환율",
+            "price": ex_data.get('closePrice'),
+            "change": ex_data.get('fluctuations'),
+            "rate": f"{ratio:.2f}",
+            "high": ex_data.get('closePrice'),
+            "low": ex_data.get('closePrice'),
+            "open": ex_data.get('closePrice'),
+            "volume": 0,
+            "prev_close": ex_data.get('closePrice'),
+            "status": "UP" if ratio > 0 else "DOWN" if ratio < 0 else "SAME"
+        }
+        
     elif code in ["OIL_CL", "CMDT_GC"]:
         res = requests.get("https://finance.naver.com/marketindex/", headers=HEADERS, timeout=5)
         res.encoding = 'euc-kr'
@@ -554,6 +682,15 @@ def fetch_stock_price(code: str):
                 "prev_close": price,
                 "status": status
             }
+
+    # 해외 주식 판별 (길이가 6이 아니거나 첫 자리가 숫자가 아님)
+    is_us_stock = False
+    if code not in VALID_INDICES:
+        if len(code) != 6 or not code[0].isdigit():
+            is_us_stock = True
+            
+    if is_us_stock:
+        return fetch_us_stock_price(code)
 
     stock_url = f'https://polling.finance.naver.com/api/realtime/domestic/stock/{code}'
     res = requests.get(stock_url, headers=HEADERS, timeout=5)
@@ -661,8 +798,9 @@ VALID_INDICES = ["KOSPI", "KOSDAQ", "USDKRW", "NASDAQ", "OIL_CL", "CMDT_GC"]
 
 @app.get("/api/stock/{code}")
 def get_stock(code: str):
-    if code not in VALID_INDICES and (not code.isalnum() or len(code) != 6):
-        raise HTTPException(status_code=400, detail="유효한 6자리 종목 코드 또는 지수명을 입력해주세요.")
+    is_valid_code = code in VALID_INDICES or (1 <= len(code) <= 15 and re.match(r'^[a-zA-Z0-9.\-]+$', code))
+    if not is_valid_code:
+        raise HTTPException(status_code=400, detail="유효한 종목 코드 또는 티커를 입력해주세요.")
     try:
         return get_cached_or_fetch(f"stock_{code}", lambda: fetch_stock_price(code))
     except Exception as e:
@@ -773,11 +911,18 @@ YAHOO_SYMBOLS = {
 def fetch_stock_chart(code: str):
     candles = []
     
-    if code in YAHOO_SYMBOLS:
+    # 해외 주식 판별 (길이가 6이 아니거나 첫 자리가 숫자가 아님)
+    is_us_stock = False
+    if code not in VALID_INDICES:
+        if len(code) != 6 or not code[0].isdigit():
+            is_us_stock = True
+
+    if code in YAHOO_SYMBOLS or is_us_stock:
         # 야후 파이낸스 API로부터 1년치 일봉 데이터 조회
-        yahoo_sym = YAHOO_SYMBOLS[code]
+        yahoo_sym = YAHOO_SYMBOLS[code] if code in YAHOO_SYMBOLS else code.upper()
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}?interval=1d&range=1y"
-        res = requests.get(url, headers=HEADERS, timeout=5)
+        yahoo_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        res = requests.get(url, headers=yahoo_headers, timeout=5)
         if res.status_code != 200:
             raise Exception(f"Yahoo Finance API error: status {res.status_code}")
             
@@ -881,8 +1026,9 @@ def fetch_stock_chart(code: str):
 
 @app.get("/api/stock/{code}/chart")
 def get_stock_chart(code: str):
-    if code not in VALID_INDICES and (not code.isalnum() or len(code) != 6):
-        raise HTTPException(status_code=400, detail="유효한 6자리 종목 코드 또는 지수명을 입력해주세요.")
+    is_valid_code = code in VALID_INDICES or (1 <= len(code) <= 15 and re.match(r'^[a-zA-Z0-9.\-]+$', code))
+    if not is_valid_code:
+        raise HTTPException(status_code=400, detail="유효한 종목 코드 또는 티커를 입력해주세요.")
     try:
         return get_cached_or_fetch(f"chart_{code}", lambda: fetch_stock_chart(code))
     except Exception as e:
