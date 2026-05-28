@@ -20,6 +20,16 @@ const UPDATE_INTERVAL = 3000; // 3초 주기 폴링
 let isEditingAvgPrice = false; // 평단가 수정 중 폴링 리렌더링 방지 플래그
 let isEditingQuantity = false; // 보유수량 수정 중 폴링 리렌더링 방지 플래그
 
+let usStockCurrency = localStorage.getItem('usStockCurrency') || 'USD'; // 'USD' 또는 'KRW'
+let usdKrwRate = 1350.0; // 실시간 환율 저장용 글로벌 변수 (기본값 1350.0)
+
+// 해외 주식 판별 헬퍼 함수
+function isUsStock(code) {
+    const VALID_INDICES = ["KOSPI", "KOSDAQ", "USDKRW", "NASDAQ", "OIL_CL", "CMDT_GC"];
+    if (VALID_INDICES.includes(code)) return false;
+    return code.length !== 6 || !/^\d/.test(code);
+}
+
 // ApexCharts 인스턴스 관리용 글로벌 객체
 let candleChart = null;
 let volumeChart = null;
@@ -440,6 +450,44 @@ document.addEventListener('DOMContentLoaded', async () => {
             toggleStealthMode();
         }
     });
+
+    // 7. 해외 주식 통화 전환 탭 이벤트 바인딩
+    const currencyTabs = document.getElementById('us-currency-tabs');
+    if (currencyTabs) {
+        const buttons = currencyTabs.querySelectorAll('.currency-tab-btn');
+        buttons.forEach(btn => {
+            const currency = btn.getAttribute('data-currency');
+            
+            // 초기 active 클래스 설정
+            if (currency === usStockCurrency) {
+                btn.classList.add('active');
+                btn.style.background = 'rgba(255,255,255,0.1)';
+                btn.style.color = 'var(--accent-color)';
+            } else {
+                btn.classList.remove('active');
+                btn.style.background = 'transparent';
+                btn.style.color = 'var(--text-secondary)';
+            }
+            
+            btn.addEventListener('click', () => {
+                usStockCurrency = currency;
+                localStorage.setItem('usStockCurrency', usStockCurrency);
+                
+                // 버튼 UI 업데이트
+                buttons.forEach(b => {
+                    b.classList.remove('active');
+                    b.style.background = 'transparent';
+                    b.style.color = 'var(--text-secondary)';
+                });
+                btn.classList.add('active');
+                btn.style.background = 'rgba(255,255,255,0.1)';
+                btn.style.color = 'var(--accent-color)';
+                
+                // 테이블 갱신 및 자산 재연산
+                updateWatchlistData();
+            });
+        });
+    }
 });
 
 // VS Code 위장용 행 번호 생성
@@ -486,6 +534,11 @@ async function updateMarketSummary() {
         const res = await fetch('/api/market-summary');
         if (!res.ok) throw new Error('Market Summary API Error');
         const data = await res.json();
+
+        // 실시간 환율 글로벌 변수 업데이트
+        if (data.exchange && data.exchange.price) {
+            usdKrwRate = parseFloat(data.exchange.price.replace(/,/g, '')) || 1350.0;
+        }
 
         // UI 갱신 (지표 카드)
         renderIndexCard('kospi', data.kospi);
@@ -650,28 +703,52 @@ async function updateWatchlistData() {
             let profitClass = 'text-same';
             
             if (avgPrice > 0) {
-                const profitRate = ((currentPriceNum - avgPrice) / avgPrice) * 100;
+                const isUs = isUsStock(stock.code);
+                const effectiveCurrentPrice = isUs ? (currentPriceNum * usdKrwRate) : currentPriceNum;
+                const profitRate = ((effectiveCurrentPrice - avgPrice) / avgPrice) * 100;
                 profitRateText = `${profitRate > 0 ? '+' : ''}${profitRate.toFixed(2)}%`;
                 profitClass = profitRate > 0 ? 'text-up' : profitRate < 0 ? 'text-down' : 'text-same';
             }
 
             const evalPrice = quantity > 0 ? currentPriceNum * quantity : 0;
 
+            const isUs = isUsStock(stock.code);
+            let displayPrice = stock.price;
+            let displayAvgPrice = avgPrice > 0 ? avgPrice.toLocaleString() : '클릭하여 입력';
+            let displayEvalPrice = evalPrice > 0 ? Math.round(evalPrice).toLocaleString() : '-';
+
+            if (isUs) {
+                if (usStockCurrency === 'KRW') {
+                    const priceKRW = currentPriceNum * usdKrwRate;
+                    const evalPriceKRW = evalPrice * usdKrwRate;
+
+                    displayPrice = `₩${Math.round(priceKRW).toLocaleString()}`;
+                    displayAvgPrice = avgPrice > 0 ? `₩${Math.round(avgPrice).toLocaleString()}` : '클릭하여 입력';
+                    displayEvalPrice = evalPrice > 0 ? `₩${Math.round(evalPriceKRW).toLocaleString()}` : '-';
+                } else {
+                    const avgPriceUSD = avgPrice / usdKrwRate;
+
+                    displayPrice = `$${currentPriceNum.toFixed(2)}`;
+                    displayAvgPrice = avgPrice > 0 ? `$${avgPriceUSD.toFixed(2)}` : '클릭하여 입력';
+                    displayEvalPrice = evalPrice > 0 ? `$${evalPrice.toFixed(2)}` : '-';
+                }
+            }
+
             tr.innerHTML = `
                 <td class="drag-handle"><i class="fa-solid fa-grip-lines"></i></td>
                 <td><strong>${stock.name}</strong></td>
                 <td><span class="stock-code">${stock.code}</span></td>
-                <td class="stock-price ${statusClass} ${flashClass}">${stock.price}</td>
+                <td class="stock-price ${statusClass} ${flashClass}">${displayPrice}</td>
                 <td class="stock-change-wrap ${statusClass}">${prefix} ${stock.change}</td>
                 <td class="stock-change-wrap ${statusClass}">${stock.status === 'UP' ? '+' : ''}${stock.rate}%</td>
                 <td class="avg-price-cell" data-code="${stock.code}" data-value="${avgPrice}">
-                    ${avgPrice > 0 ? avgPrice.toLocaleString() : '클릭하여 입력'}
+                    ${displayAvgPrice}
                 </td>
                 <td class="quantity-cell" data-code="${stock.code}" data-value="${quantity}">
                     ${formatQuantity(quantity)}
                 </td>
                 <td class="eval-price-cell font-outfit">
-                    ${evalPrice > 0 ? Math.round(evalPrice).toLocaleString() : '-'}
+                    ${displayEvalPrice}
                 </td>
                 <td class="profit-rate-cell ${profitClass}">${profitRateText}</td>
                 <td class="text-same">${stock.volume.toLocaleString()}</td>
@@ -787,10 +864,14 @@ function bindAvgPriceEditor() {
             const code = cell.getAttribute('data-code');
             const currentVal = cell.getAttribute('data-value');
             
+            const isUs = isUsStock(code);
             const input = document.createElement('input');
             input.type = 'number';
             input.className = 'avg-price-input';
             input.value = currentVal === '0' ? '' : currentVal;
+            if (isUs) {
+                input.placeholder = "원화 평단가";
+            }
             
             cell.innerHTML = '';
             cell.appendChild(input);
@@ -914,8 +995,15 @@ function updatePortfolioSummary(results) {
             const currentPriceNum = parseFloat(stock.price.replace(/,/g, '')) || 0;
             
             if (quantity > 0) {
-                currentEval += currentPriceNum * quantity;
-                currentPurchase += avgPrice * quantity;
+                if (isUsStock(item.code)) {
+                    if (usStockCurrency === 'KRW') {
+                        currentEval += currentPriceNum * quantity * usdKrwRate;
+                        currentPurchase += avgPrice * quantity;
+                    }
+                } else {
+                    currentEval += currentPriceNum * quantity;
+                    currentPurchase += avgPrice * quantity;
+                }
             }
         }
     });
@@ -970,8 +1058,15 @@ function updatePortfolioSummary(results) {
                         const currentPriceNum = parseFloat(stock.price.replace(/,/g, '')) || 0;
                         
                         if (quantity > 0) {
-                            combinedEval += currentPriceNum * quantity;
-                            combinedPurchase += avgPrice * quantity;
+                            if (isUsStock(item.code)) {
+                                if (usStockCurrency === 'KRW') {
+                                    combinedEval += currentPriceNum * quantity * usdKrwRate;
+                                    combinedPurchase += avgPrice * quantity;
+                                }
+                            } else {
+                                combinedEval += currentPriceNum * quantity;
+                                combinedPurchase += avgPrice * quantity;
+                            }
                         }
                     }
                 });
@@ -1024,16 +1119,41 @@ function renderStockDetails(stock) {
     const rateEl = document.getElementById('detail-rate');
     const statusClass = stock.status === 'UP' ? 'text-up' : stock.status === 'DOWN' ? 'text-down' : 'text-same';
     
+    const isUs = isUsStock(stock.code);
+    let displayPrice = stock.price;
+    let displayOpen = stock.open;
+    let displayHigh = stock.high;
+    let displayLow = stock.low;
+
+    if (isUs) {
+        const currentPriceNum = parseFloat(stock.price.replace(/,/g, ''));
+        const openNum = parseFloat(stock.open.replace(/,/g, ''));
+        const highNum = parseFloat(stock.high.replace(/,/g, ''));
+        const lowNum = parseFloat(stock.low.replace(/,/g, ''));
+
+        if (usStockCurrency === 'KRW') {
+            displayPrice = `₩${Math.round(currentPriceNum * usdKrwRate).toLocaleString()}`;
+            displayOpen = `₩${Math.round(openNum * usdKrwRate).toLocaleString()}`;
+            displayHigh = `₩${Math.round(highNum * usdKrwRate).toLocaleString()}`;
+            displayLow = `₩${Math.round(lowNum * usdKrwRate).toLocaleString()}`;
+        } else {
+            displayPrice = `$${currentPriceNum.toFixed(2)}`;
+            displayOpen = `$${openNum.toFixed(2)}`;
+            displayHigh = `$${highNum.toFixed(2)}`;
+            displayLow = `$${lowNum.toFixed(2)}`;
+        }
+    }
+
     priceEl.className = 'value ' + statusClass;
-    priceEl.innerText = stock.price;
+    priceEl.innerText = displayPrice;
     
     rateEl.className = 'value ' + statusClass;
     rateEl.innerText = `${stock.status === 'UP' ? '+' : ''}${stock.rate}%`;
     
-    document.getElementById('detail-open').innerText = stock.open;
+    document.getElementById('detail-open').innerText = displayOpen;
     document.getElementById('detail-volume').innerText = stock.volume.toLocaleString();
-    document.getElementById('detail-high').innerText = stock.high;
-    document.getElementById('detail-low').innerText = stock.low;
+    document.getElementById('detail-high').innerText = displayHigh;
+    document.getElementById('detail-low').innerText = displayLow;
 
     // MTS 모바일 차트 헤더 실시간 시세 연동
     const mtsTitle = document.getElementById('chart-stock-title');
@@ -1045,7 +1165,7 @@ function renderStockDetails(stock) {
 
     if (mtsTitle) mtsTitle.innerText = stock.name;
     if (mtsPrice) {
-        mtsPrice.innerText = stock.price;
+        mtsPrice.innerText = displayPrice;
         mtsPrice.className = 'mts-current-price ' + statusClass;
     }
     if (mtsArrow) {
@@ -1053,7 +1173,15 @@ function renderStockDetails(stock) {
         mtsArrow.className = 'mts-change-arrow ' + statusClass;
     }
     if (mtsChange) {
-        mtsChange.innerText = stock.change;
+        let displayChange = stock.change;
+        if (isUs && usStockCurrency === 'KRW') {
+            const changeNum = parseFloat(stock.change.replace(/,/g, ''));
+            displayChange = `₩${Math.round(changeNum * usdKrwRate).toLocaleString()}`;
+        } else if (isUs) {
+            const changeNum = parseFloat(stock.change.replace(/,/g, ''));
+            displayChange = `$${changeNum.toFixed(2)}`;
+        }
+        mtsChange.innerText = displayChange;
         mtsChange.className = 'mts-change-price ' + statusClass;
     }
     if (mtsRate) {

@@ -2223,4 +2223,39 @@ tr.drag-over {
     border-color: #0f172a !important;
 }
 
+/* 해외 주식 통화 전환 탭 스타일 */
+.currency-tabs {
+    display: inline-flex;
+    gap: 4px;
+    margin-left: 20px;
+    background: rgba(0, 0, 0, 0.3) !important;
+    padding: 3px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    vertical-align: middle;
+}
+
+.currency-tab-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: all 0.2s;
+    outline: none;
+}
+
+.currency-tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.currency-tab-btn.active {
+    background: rgba(255, 255, 255, 0.1) !important;
+    color: var(--accent-color) !important;
+}
+
 
