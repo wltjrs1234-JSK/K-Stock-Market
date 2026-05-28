@@ -755,6 +755,75 @@ def fetch_news():
 
 # --- API 엔드포인트 정의 ---
 
+US_STOCKS_PRESET = [
+    {"code": "AAPL", "name": "애플 (AAPL)"},
+    {"code": "MSFT", "name": "마이크로소프트 (MSFT)"},
+    {"code": "TSLA", "name": "테슬라 (TSLA)"},
+    {"code": "NVDA", "name": "엔비디아 (NVDA)"},
+    {"code": "AMZN", "name": "아마존닷컴 (AMZN)"},
+    {"code": "GOOGL", "name": "알파벳 A (GOOGL)"},
+    {"code": "GOOG", "name": "알파벳 C (GOOG)"},
+    {"code": "META", "name": "메타 플랫폼스 (META)"},
+    {"code": "NFLX", "name": "넷플릭스 (NFLX)"},
+    {"code": "AMD", "name": "AMD (AMD)"},
+    {"code": "INTC", "name": "인텔 (INTC)"},
+    {"code": "QCOM", "name": "퀄컴 (QCOM)"},
+    {"code": "AVGO", "name": "브로드컴 (AVGO)"},
+    {"code": "ASML", "name": "ASML (ASML)"},
+    {"code": "TSM", "name": "TSMC (TSM)"},
+    {"code": "LLY", "name": "일라이 릴리 (LLY)"},
+    {"code": "UNH", "name": "유나이티드헬스 그룹 (UNH)"},
+    {"code": "JPM", "name": "JP모건 체이스 (JPM)"},
+    {"code": "V", "name": "비자 (V)"},
+    {"code": "MA", "name": "마스터카드 (MA)"},
+    {"code": "DIS", "name": "월트 디즈니 (DIS)"},
+    {"code": "KO", "name": "코카콜라 (KO)"},
+    {"code": "PEP", "name": "펩시코 (PEP)"},
+    {"code": "NKE", "name": "나이키 (NKE)"},
+    {"code": "SBUX", "name": "스타벅스 (SBUX)"},
+    {"code": "XOM", "name": "엑슨모빌 (XOM)"},
+    {"code": "CVX", "name": "쉐브론 (CVX)"},
+    {"code": "COST", "name": "코스트코 홀세일 (COST)"},
+    {"code": "WMT", "name": "월마트 (WMT)"},
+    {"code": "BRK-B", "name": "버크셔 해서웨이 Class B (BRK-B)"},
+    {"code": "JNJ", "name": "존슨앤존슨 (JNJ)"},
+    {"code": "PG", "name": "프록터 앤 갬블 (PG)"},
+    {"code": "MRK", "name": "머크 (MRK)"},
+    {"code": "ABBV", "name": "애브비 (ABBV)"},
+    {"code": "ACN", "name": "액센츄어 (ACN)"},
+    {"code": "ORCL", "name": "오라클 (ORCL)"},
+    {"code": "TXN", "name": "텍사스 인스트루먼트 (TXN)"},
+    {"code": "PM", "name": "필립모리스 인터내셔널 (PM)"},
+    {"code": "NOC", "name": "노스롭 그루만 (NOC)"},
+    {"code": "LMT", "name": "록히드 마틴 (LMT)"},
+    {"code": "RTX", "name": "레이시온 테크놀로지스 (RTX)"},
+    {"code": "HON", "name": "하니웰 (HON)"},
+    {"code": "CAT", "name": "캐터필러 (CAT)"},
+    {"code": "GE", "name": "제너럴 일렉트릭 (GE)"},
+    {"code": "BA", "name": "보잉 (BA)"},
+    {"code": "UPS", "name": "유나이티드 파셀 서비스 (UPS)"},
+    {"code": "FDX", "name": "페덱스 (FDX)"},
+    {"code": "T", "name": "AT&T (T)"},
+    {"code": "VZ", "name": "버라이즌 커뮤니케이션스 (VZ)"},
+    {"code": "PFE", "name": "화이자 (PFE)"},
+    {"code": "NVO", "name": "노보 노디스크 (NVO)"},
+    {"code": "AZN", "name": "아스트라제네카 (AZN)"},
+    {"code": "BABA", "name": "알리바바 그룹 (BABA)"},
+    {"code": "PDD", "name": "핀둬둬 (PDD)"},
+    {"code": "NIO", "name": "니오 (NIO)"},
+    {"code": "COIN", "name": "코인베이스 글로벌 (COIN)"},
+    {"code": "PLTR", "name": "팔란티어 테크놀로지스 (PLTR)"},
+    {"code": "SQ", "name": "블록 (SQ)"},
+    {"code": "PYPL", "name": "페이팔 홀딩스 (PYPL)"},
+    {"code": "ARM", "name": "암 홀딩스 (ARM)"},
+    {"code": "MU", "name": "마이크론 테크놀로지 (MU)"},
+    {"code": "PANW", "name": "팔로알토 네트웍스 (PANW)"},
+    {"code": "SNOW", "name": "스노우플레이크 (SNOW)"},
+    {"code": "CRWD", "name": "크라우드스트라이크 (CRWD)"},
+    {"code": "MSTR", "name": "마이크로스트래티지 (MSTR)"},
+    {"code": "SMCI", "name": "슈퍼마이크로컴퓨터 (SMCI)"},
+]
+
 @app.get("/api/search")
 def search_stocks(q: str = ""):
     if not q:
@@ -763,6 +832,20 @@ def search_stocks(q: str = ""):
     query = q.strip().replace(" ", "").lower()
     results = []
     
+    # 1. 해외 주식 프리셋 검색 수행
+    for stock in US_STOCKS_PRESET:
+        name = stock["name"]
+        code = stock["code"]
+        
+        name_clean = name.replace(" ", "").lower()
+        chosung = get_chosung(name_clean)
+        
+        if query in name_clean or query in code.lower() or query in chosung:
+            results.append(stock)
+            if len(results) >= 10:
+                return results
+
+    # 2. 국내 주식 검색 수행
     with STOCKS_LOCK:
         for stock in STOCKS_LIST:
             name = stock["name"]
@@ -772,9 +855,11 @@ def search_stocks(q: str = ""):
             chosung = get_chosung(name_clean)
             
             if query in name_clean or query in code or query in chosung:
-                results.append(stock)
-                if len(results) >= 10:
-                    break
+                if not any(r["code"] == code for r in results):
+                    results.append(stock)
+                    if len(results) >= 10:
+                        break
+                        
     return results
 
 @app.get("/api/watchlist")

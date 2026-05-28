@@ -10,6 +10,11 @@
           "quantity": 59.0
         },
         {
+          "code": "0183J0",
+          "avgPrice": 13814.0,
+          "quantity": 132.0
+        },
+        {
           "code": "360200",
           "avgPrice": 22062.0,
           "quantity": 305.0
@@ -53,16 +58,6 @@
           "code": "489250",
           "avgPrice": 10667.0,
           "quantity": 44.0
-        },
-        {
-          "code": "0183J0",
-          "avgPrice": 13814.0,
-          "quantity": 132.0
-        },
-        {
-          "code": "AAPL",
-          "avgPrice": 0.0,
-          "quantity": 0.0
         }
       ]
     },
@@ -132,7 +127,27 @@
       "name": "직투계좌",
       "watchlist": [
         {
-          "code": "MSTF",
+          "code": "MSFT",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "AAPL",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "PLTR",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "SOXX",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "NVDA",
           "avgPrice": 0.0,
           "quantity": 0.0
         }
