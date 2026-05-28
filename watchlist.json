@@ -128,48 +128,48 @@
       "watchlist": [
         {
           "code": "NVDA",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 244069.0,
+          "quantity": 20.6792
         },
         {
           "code": "MSFT",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 649621.0,
+          "quantity": 12.89807
         },
         {
           "code": "AAPL",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 333313.0,
+          "quantity": 5.90083
         },
         {
           "code": "PLTR",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 240445.0,
+          "quantity": 15.45886
         },
         {
           "code": "SOXX",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 887374.0,
+          "quantity": 2.0
         },
         {
           "code": "LITE",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 1464012.0,
+          "quantity": 1.0
         },
         {
           "code": "SNDK",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 2250970.0,
+          "quantity": 1.0
         },
         {
           "code": "EWY",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 263076.0,
+          "quantity": 7.0
         },
         {
           "code": "GEV",
-          "avgPrice": 0.0,
-          "quantity": 0.0
+          "avgPrice": 972326.0,
+          "quantity": 1.153
         }
       ]
     },
