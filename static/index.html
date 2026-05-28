@@ -217,8 +217,8 @@
                         <div class="section-title">
                             <i class="fa-solid fa-star text-warning"></i>
                             <h2>관심 종목</h2>
-                            <!-- 해외주식 통화 전환 탭 -->
-                            <div class="currency-tabs" id="us-currency-tabs" style="display: flex; gap: 4px; margin-left: 20px; background: rgba(0,0,0,0.3); padding: 2px; border-radius: 6px; border: 1px solid var(--border-color);">
+                            <!-- 해외주식 통화 전환 탭 (원화 고정이므로 숨김 처리) -->
+                            <div class="currency-tabs" id="us-currency-tabs" style="display: none; gap: 4px; margin-left: 20px; background: rgba(0,0,0,0.3); padding: 2px; border-radius: 6px; border: 1px solid var(--border-color);">
                                 <button type="button" class="currency-tab-btn active" data-currency="USD" style="border: none; background: rgba(255,255,255,0.1); color: var(--accent-color); padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; cursor: pointer; font-weight: bold; transition: all 0.2s;">USD 달러</button>
                                 <button type="button" class="currency-tab-btn" data-currency="KRW" style="border: none; background: transparent; color: var(--text-secondary); padding: 4px 10px; font-size: 0.75rem; border-radius: 4px; cursor: pointer; font-weight: bold; transition: all 0.2s;">KRW 원화환산</button>
                             </div>
@@ -519,6 +519,6 @@ setInterval(stockEngine, <span class="code-number">3000</span>);
     </div>
 
     <!-- 스크립트 로드 -->
-    <script src="/app.js?v=2.3.0"></script>
+    <script src="/app.js?v=2.4.0"></script>
 </body>
 </html>

@@ -20,7 +20,7 @@ const UPDATE_INTERVAL = 3000; // 3초 주기 폴링
 let isEditingAvgPrice = false; // 평단가 수정 중 폴링 리렌더링 방지 플래그
 let isEditingQuantity = false; // 보유수량 수정 중 폴링 리렌더링 방지 플래그
 
-let usStockCurrency = localStorage.getItem('usStockCurrency') || 'USD'; // 'USD' 또는 'KRW'
+let usStockCurrency = 'KRW'; // 'USD' 또는 'KRW' (원화 기반 강제 고정)
 let usdKrwRate = 1350.0; // 실시간 환율 저장용 글로벌 변수 (기본값 1350.0)
 
 // 해외 주식 판별 헬퍼 함수
@@ -701,37 +701,25 @@ async function updateWatchlistData() {
             
             let profitRateText = '-';
             let profitClass = 'text-same';
+            const isUs = isUsStock(stock.code);
+            const effectiveCurrentPrice = isUs ? (currentPriceNum * usdKrwRate) : currentPriceNum;
             
             if (avgPrice > 0) {
-                const isUs = isUsStock(stock.code);
-                const effectiveCurrentPrice = isUs ? (currentPriceNum * usdKrwRate) : currentPriceNum;
                 const profitRate = ((effectiveCurrentPrice - avgPrice) / avgPrice) * 100;
                 profitRateText = `${profitRate > 0 ? '+' : ''}${profitRate.toFixed(2)}%`;
                 profitClass = profitRate > 0 ? 'text-up' : profitRate < 0 ? 'text-down' : 'text-same';
             }
 
-            const evalPrice = quantity > 0 ? currentPriceNum * quantity : 0;
+            const evalPrice = quantity > 0 ? effectiveCurrentPrice * quantity : 0;
 
-            const isUs = isUsStock(stock.code);
             let displayPrice = stock.price;
             let displayAvgPrice = avgPrice > 0 ? avgPrice.toLocaleString() : '클릭하여 입력';
             let displayEvalPrice = evalPrice > 0 ? Math.round(evalPrice).toLocaleString() : '-';
 
             if (isUs) {
-                if (usStockCurrency === 'KRW') {
-                    const priceKRW = currentPriceNum * usdKrwRate;
-                    const evalPriceKRW = evalPrice * usdKrwRate;
-
-                    displayPrice = `₩${Math.round(priceKRW).toLocaleString()}`;
-                    displayAvgPrice = avgPrice > 0 ? `₩${Math.round(avgPrice).toLocaleString()}` : '클릭하여 입력';
-                    displayEvalPrice = evalPrice > 0 ? `₩${Math.round(evalPriceKRW).toLocaleString()}` : '-';
-                } else {
-                    const avgPriceUSD = avgPrice / usdKrwRate;
-
-                    displayPrice = `$${currentPriceNum.toFixed(2)}`;
-                    displayAvgPrice = avgPrice > 0 ? `$${avgPriceUSD.toFixed(2)}` : '클릭하여 입력';
-                    displayEvalPrice = evalPrice > 0 ? `$${evalPrice.toFixed(2)}` : '-';
-                }
+                displayPrice = `₩${Math.round(effectiveCurrentPrice).toLocaleString()}`;
+                displayAvgPrice = avgPrice > 0 ? `₩${Math.round(avgPrice).toLocaleString()}` : '클릭하여 입력';
+                displayEvalPrice = evalPrice > 0 ? `₩${Math.round(evalPrice).toLocaleString()}` : '-';
             }
 
             tr.innerHTML = `
@@ -868,15 +856,8 @@ function bindAvgPriceEditor() {
             const input = document.createElement('input');
             input.type = 'number';
             input.className = 'avg-price-input';
-            
-            // USD 모드이면서 해외 주식인 경우 평단가를 달러로 환산해서 에디터에 로드
-            if (isUs && usStockCurrency === 'USD') {
-                input.value = currentVal === 0 ? '' : (currentVal / usdKrwRate).toFixed(2);
-                input.placeholder = "달러 평단가";
-            } else {
-                input.value = currentVal === 0 ? '' : currentVal;
-                input.placeholder = isUs ? "원화 평단가" : "평단가 입력";
-            }
+            input.value = currentVal === 0 ? '' : currentVal;
+            input.placeholder = isUs ? "원화 평단가" : "평단가 입력";
             
             cell.innerHTML = '';
             cell.appendChild(input);
@@ -887,13 +868,7 @@ function bindAvgPriceEditor() {
                 if (isSaved) return;
                 isSaved = true;
                 
-                let newVal = Math.max(0, parseFloat(input.value) || 0.0);
-                
-                // USD 모드에서 해외 주식 평단가를 수정한 경우, 입력받은 달러를 원화로 변환하여 백엔드에 저장
-                if (isUs && usStockCurrency === 'USD') {
-                    newVal = newVal * usdKrwRate;
-                }
-                
+                const newVal = Math.max(0, parseFloat(input.value) || 0.0);
                 updateAveragePrice(code, newVal);
                 isEditingAvgPrice = false;
             };
@@ -1139,17 +1114,10 @@ function renderStockDetails(stock) {
         const highNum = parseFloat(stock.high.replace(/,/g, ''));
         const lowNum = parseFloat(stock.low.replace(/,/g, ''));
 
-        if (usStockCurrency === 'KRW') {
-            displayPrice = `₩${Math.round(currentPriceNum * usdKrwRate).toLocaleString()}`;
-            displayOpen = `₩${Math.round(openNum * usdKrwRate).toLocaleString()}`;
-            displayHigh = `₩${Math.round(highNum * usdKrwRate).toLocaleString()}`;
-            displayLow = `₩${Math.round(lowNum * usdKrwRate).toLocaleString()}`;
-        } else {
-            displayPrice = `$${currentPriceNum.toFixed(2)}`;
-            displayOpen = `$${openNum.toFixed(2)}`;
-            displayHigh = `$${highNum.toFixed(2)}`;
-            displayLow = `$${lowNum.toFixed(2)}`;
-        }
+        displayPrice = `₩${Math.round(currentPriceNum * usdKrwRate).toLocaleString()}`;
+        displayOpen = `₩${Math.round(openNum * usdKrwRate).toLocaleString()}`;
+        displayHigh = `₩${Math.round(highNum * usdKrwRate).toLocaleString()}`;
+        displayLow = `₩${Math.round(lowNum * usdKrwRate).toLocaleString()}`;
     }
 
     priceEl.className = 'value ' + statusClass;
@@ -1182,12 +1150,9 @@ function renderStockDetails(stock) {
     }
     if (mtsChange) {
         let displayChange = stock.change;
-        if (isUs && usStockCurrency === 'KRW') {
+        if (isUs) {
             const changeNum = parseFloat(stock.change.replace(/,/g, ''));
             displayChange = `₩${Math.round(changeNum * usdKrwRate).toLocaleString()}`;
-        } else if (isUs) {
-            const changeNum = parseFloat(stock.change.replace(/,/g, ''));
-            displayChange = `$${changeNum.toFixed(2)}`;
         }
         mtsChange.innerText = displayChange;
         mtsChange.className = 'mts-change-price ' + statusClass;
