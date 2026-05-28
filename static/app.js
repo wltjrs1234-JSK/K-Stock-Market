@@ -22,6 +22,7 @@ let isEditingQuantity = false; // 보유수량 수정 중 폴링 리렌더링 �
 
 let usStockCurrency = 'KRW'; // 'USD' 또는 'KRW' (원화 기반 강제 고정)
 let usdKrwRate = 1350.0; // 실시간 환율 저장용 글로벌 변수 (기본값 1350.0)
+let cachedStockData = {}; // 마지막으로 조회된 주가 캐시 (평단가/수량 변경 시 즉시 행 갱신용)
 
 // 해외 주식 판별 헬퍼 함수
 function isUsStock(code) {
@@ -639,6 +640,13 @@ async function updateWatchlistData() {
     try {
         const results = await Promise.all(promises);
         
+        // 조회된 주가를 캐시에 저장 (평단가/수량 변경 시 즉시 행 갱신에 활용)
+        results.forEach(stock => {
+            if (stock && stock.code) {
+                cachedStockData[stock.code] = stock;
+            }
+        });
+        
         // 2. 종목 상세 뷰 정보 갱신 (선택된 종목이 있을 경우)
         let selectedStock = results.find(s => s && s.code === selectedStockCode);
         if (selectedStock) {
@@ -888,6 +896,71 @@ function bindAvgPriceEditor() {
     });
 }
 
+// 캐시된 주가를 이용해 특정 행의 평가금액·수익률 셀을 즉시 갱신 (API 재호출 없음)
+function refreshRowDisplay(code) {
+    const stock = cachedStockData[code];
+    if (!stock) return;
+
+    const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+    if (!activeAcc) return;
+    const watchItem = activeAcc.watchlist.find(w => w.code === code);
+    if (!watchItem) return;
+
+    const row = document.querySelector(`#watchlist-tbody tr[data-code="${code}"]`);
+    if (!row) return;
+
+    const avgPrice = watchItem.avgPrice || 0;
+    const quantity = watchItem.quantity || 0;
+    const currentPriceNum = parseFloat(String(stock.price).replace(/,/g, '')) || 0;
+    const isUs = isUsStock(code);
+    const effectiveCurrentPrice = isUs ? (currentPriceNum * usdKrwRate) : currentPriceNum;
+
+    // 평단가 셀 갱신
+    const avgPriceCell = row.querySelector('.avg-price-cell');
+    if (avgPriceCell && !avgPriceCell.querySelector('input')) {
+        avgPriceCell.setAttribute('data-value', avgPrice);
+        if (isUs) {
+            avgPriceCell.textContent = avgPrice > 0 ? `\u20a9${Math.round(avgPrice).toLocaleString()}` : '클릭하여 입력';
+        } else {
+            avgPriceCell.textContent = avgPrice > 0 ? avgPrice.toLocaleString() : '클릭하여 입력';
+        }
+    }
+
+    // 수량 셀 갱신
+    const quantityCell = row.querySelector('.quantity-cell');
+    if (quantityCell && !quantityCell.querySelector('input')) {
+        quantityCell.setAttribute('data-value', quantity);
+        quantityCell.textContent = formatQuantity(quantity);
+    }
+
+    // 평가금액 셀 갱신
+    const evalPrice = quantity > 0 ? effectiveCurrentPrice * quantity : 0;
+    let displayEvalPrice = evalPrice > 0 ? Math.round(evalPrice).toLocaleString() : '-';
+    if (isUs) {
+        displayEvalPrice = evalPrice > 0 ? `\u20a9${Math.round(evalPrice).toLocaleString()}` : '-';
+    }
+    const evalCell = row.querySelector('.eval-price-cell');
+    if (evalCell) evalCell.textContent = displayEvalPrice;
+
+    // 평단대비 수익률 셀 갱신
+    let profitRateText = '-';
+    let profitClass = 'text-same';
+    if (avgPrice > 0 && effectiveCurrentPrice > 0) {
+        const profitRate = ((effectiveCurrentPrice - avgPrice) / avgPrice) * 100;
+        profitRateText = `${profitRate > 0 ? '+' : ''}${profitRate.toFixed(2)}%`;
+        profitClass = profitRate > 0 ? 'text-up' : profitRate < 0 ? 'text-down' : 'text-same';
+    }
+    const profitCell = row.querySelector('.profit-rate-cell');
+    if (profitCell) {
+        profitCell.textContent = profitRateText;
+        profitCell.className = `profit-rate-cell ${profitClass}`;
+    }
+
+    // 자산 요약 카드도 즉시 갱신 (캐시 기반)
+    const cachedResults = Object.values(cachedStockData);
+    updatePortfolioSummary(cachedResults);
+}
+
 // 평단가 정보 갱신
 function updateAveragePrice(code, price) {
     const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
@@ -897,7 +970,10 @@ function updateAveragePrice(code, price) {
     if (idx !== -1) {
         activeAcc.watchlist[idx].avgPrice = price;
         saveWatchlistToServer();
-        isEditingAvgPrice = false; 
+        isEditingAvgPrice = false;
+        // 캐시를 이용해 즉시 해당 행 갱신 (API 재호출 없음)
+        refreshRowDisplay(code);
+        // 비동기로 전체 갱신도 실행 (다음 폴링 주기와 별개로)
         updateWatchlistData();
         if (selectedStockCode === code) {
             updateStockChart(code);
@@ -961,6 +1037,9 @@ function updateQuantity(code, qty) {
         activeAcc.watchlist[idx].quantity = qty;
         saveWatchlistToServer();
         isEditingQuantity = false;
+        // 캐시를 이용해 즉시 해당 행 갱신 (API 재호출 없음)
+        refreshRowDisplay(code);
+        // 비동기로 전체 갱신도 실행
         updateWatchlistData();
     }
 }
