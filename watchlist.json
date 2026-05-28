@@ -127,6 +127,11 @@
       "name": "직투계좌",
       "watchlist": [
         {
+          "code": "NVDA",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
           "code": "MSFT",
           "avgPrice": 0.0,
           "quantity": 0.0
@@ -147,7 +152,22 @@
           "quantity": 0.0
         },
         {
-          "code": "NVDA",
+          "code": "LITE",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "SNDK",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "EWY",
+          "avgPrice": 0.0,
+          "quantity": 0.0
+        },
+        {
+          "code": "GEV",
           "avgPrice": 0.0,
           "quantity": 0.0
         }
