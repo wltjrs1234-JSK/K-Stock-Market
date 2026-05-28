@@ -862,15 +862,20 @@ function bindAvgPriceEditor() {
             isEditingAvgPrice = true;
             
             const code = cell.getAttribute('data-code');
-            const currentVal = cell.getAttribute('data-value');
-            
+            const currentVal = parseFloat(cell.getAttribute('data-value')) || 0;
             const isUs = isUsStock(code);
+            
             const input = document.createElement('input');
             input.type = 'number';
             input.className = 'avg-price-input';
-            input.value = currentVal === '0' ? '' : currentVal;
-            if (isUs) {
-                input.placeholder = "원화 평단가";
+            
+            // USD 모드이면서 해외 주식인 경우 평단가를 달러로 환산해서 에디터에 로드
+            if (isUs && usStockCurrency === 'USD') {
+                input.value = currentVal === 0 ? '' : (currentVal / usdKrwRate).toFixed(2);
+                input.placeholder = "달러 평단가";
+            } else {
+                input.value = currentVal === 0 ? '' : currentVal;
+                input.placeholder = isUs ? "원화 평단가" : "평단가 입력";
             }
             
             cell.innerHTML = '';
@@ -881,7 +886,14 @@ function bindAvgPriceEditor() {
             const saveValue = () => {
                 if (isSaved) return;
                 isSaved = true;
-                const newVal = Math.max(0, parseFloat(input.value) || 0.0);
+                
+                let newVal = Math.max(0, parseFloat(input.value) || 0.0);
+                
+                // USD 모드에서 해외 주식 평단가를 수정한 경우, 입력받은 달러를 원화로 변환하여 백엔드에 저장
+                if (isUs && usStockCurrency === 'USD') {
+                    newVal = newVal * usdKrwRate;
+                }
+                
                 updateAveragePrice(code, newVal);
                 isEditingAvgPrice = false;
             };
@@ -996,10 +1008,8 @@ function updatePortfolioSummary(results) {
             
             if (quantity > 0) {
                 if (isUsStock(item.code)) {
-                    if (usStockCurrency === 'KRW') {
-                        currentEval += currentPriceNum * quantity * usdKrwRate;
-                        currentPurchase += avgPrice * quantity;
-                    }
+                    currentEval += currentPriceNum * quantity * usdKrwRate;
+                    currentPurchase += avgPrice * quantity;
                 } else {
                     currentEval += currentPriceNum * quantity;
                     currentPurchase += avgPrice * quantity;
@@ -1059,10 +1069,8 @@ function updatePortfolioSummary(results) {
                         
                         if (quantity > 0) {
                             if (isUsStock(item.code)) {
-                                if (usStockCurrency === 'KRW') {
-                                    combinedEval += currentPriceNum * quantity * usdKrwRate;
-                                    combinedPurchase += avgPrice * quantity;
-                                }
+                                combinedEval += currentPriceNum * quantity * usdKrwRate;
+                                combinedPurchase += avgPrice * quantity;
                             } else {
                                 combinedEval += currentPriceNum * quantity;
                                 combinedPurchase += avgPrice * quantity;
