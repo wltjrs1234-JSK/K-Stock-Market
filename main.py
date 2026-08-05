@@ -895,6 +895,16 @@ def get_stock(code: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/stock/{code}/chart")
+def get_stock_chart(code: str):
+    is_valid_code = code in VALID_INDICES or (1 <= len(code) <= 15 and re.match(r'^[a-zA-Z0-9.\-]+$', code))
+    if not is_valid_code:
+        raise HTTPException(status_code=400, detail="유효한 종목 코드 또는 티커를 입력해주세요.")
+    try:
+        return get_cached_or_fetch(f"chart_{code}", lambda: fetch_stock_chart(code), ttl_seconds=30)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/news")
 def get_market_news():
     try:
@@ -1117,6 +1127,7 @@ def fetch_stock_chart(code: str):
                             'low': float(data[3]),
                             'close': float(data[4]),
                             'volume': float(data[5])
+                        })
         except Exception as e:
             print(f"국내주식 네이버 차트 조회 실패 ({code}):", e)
             
