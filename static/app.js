@@ -529,7 +529,16 @@ function bindIndexTriggerCards() {
             // 관심종목 테이블 행 선택 해제
             document.querySelectorAll('#watchlist-tbody tr').forEach(r => r.classList.remove('active-row'));
 
-            // 해당 지수/환율/원자재 상세 시세 카드 표시
+            // 1순위: 차트 갱신을 먼저 즉각 시작!
+            updateStockChart(code);
+
+            // 차트 영역으로 화면을 부드럽게 자동 스크롤 이동시켜 사용자가 바로 차트를 볼 수 있도록 함
+            const chartWrapper = document.getElementById('bottom-left-chart-wrapper') || document.getElementById('chart-placeholder');
+            if (chartWrapper) {
+                chartWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+
+            // 2순위: 상세 정보 렌더링
             try {
                 const res = await fetch(`/api/stock/${code}`);
                 if (res.ok) {
@@ -539,9 +548,6 @@ function bindIndexTriggerCards() {
             } catch (e) {
                 console.error("지수 상세 정보 조회 실패:", e);
             }
-
-            // 차트 갱신
-            updateStockChart(code);
         });
     });
 }
@@ -855,7 +861,13 @@ async function updateWatchlistData() {
                 renderStockDetails(stock);
                 
                 // 차트 업데이트
-                updateStockChart(stock.code); 
+                updateStockChart(stock.code);
+
+                // 차트 영역으로 화면을 부드럽게 스크롤 이동
+                const chartWrapper = document.getElementById('bottom-left-chart-wrapper') || document.getElementById('chart-placeholder');
+                if (chartWrapper) {
+                    chartWrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
             });
 
             bindDragAndDropEvents(tr);
@@ -1505,10 +1517,10 @@ function renderStockDetails(stock) {
     let displayLow = stock.low;
 
     if (isUs) {
-        const currentPriceNum = parseFloat(stock.price.replace(/,/g, ''));
-        const openNum = parseFloat(stock.open.replace(/,/g, ''));
-        const highNum = parseFloat(stock.high.replace(/,/g, ''));
-        const lowNum = parseFloat(stock.low.replace(/,/g, ''));
+        const currentPriceNum = parseFloat(String(stock.price || 0).replace(/,/g, '')) || 0;
+        const openNum = parseFloat(String(stock.open || 0).replace(/,/g, '')) || 0;
+        const highNum = parseFloat(String(stock.high || 0).replace(/,/g, '')) || 0;
+        const lowNum = parseFloat(String(stock.low || 0).replace(/,/g, '')) || 0;
 
         displayPrice = `₩${Math.round(currentPriceNum * usdKrwRate).toLocaleString()}`;
         displayOpen = `₩${Math.round(openNum * usdKrwRate).toLocaleString()}`;
@@ -1814,14 +1826,15 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
     }
 
     // 2. 현재가 기준선 및 Y축 말풍선
-    if (currentStock) {
-        let currentPriceNum = parseFloat(currentStock.price.replace(/,/g, ''));
+    if (currentStock && currentStock.price !== undefined && currentStock.price !== null) {
+        const rawPriceStr = String(currentStock.price);
+        let currentPriceNum = parseFloat(rawPriceStr.replace(/,/g, '')) || 0;
         if (isUs) {
             currentPriceNum = currentPriceNum * usdKrwRate;
         }
         const statusColor = currentStock.status === 'UP' ? '#ef4444' : currentStock.status === 'DOWN' ? '#3b82f6' : '#94a3b8';
         
-        let displayText = `${currentStock.price} (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
+        let displayText = `${rawPriceStr} (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
         if (isUs) {
             displayText = `₩${Math.round(currentPriceNum).toLocaleString()} (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
         }

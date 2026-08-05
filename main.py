@@ -901,7 +901,7 @@ def get_stock_chart(code: str):
     if not is_valid_code:
         raise HTTPException(status_code=400, detail="유효한 종목 코드 또는 티커를 입력해주세요.")
     try:
-        return get_cached_or_fetch(f"chart_{code}", lambda: fetch_stock_chart(code), ttl_seconds=30)
+        return get_cached_or_fetch(f"chart_{code}", lambda: fetch_stock_chart(code), ttl_seconds=300)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
