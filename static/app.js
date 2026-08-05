@@ -1354,14 +1354,14 @@ function renderPortfolioPieChart(categoryTotals, stockTotals, totalEval) {
             type: 'donut',
             height: 270,
             background: 'transparent',
-            foreColor: '#94a3b8',
+            foreColor: '#334155',
             fontFamily: 'Outfit, Noto Sans KR, sans-serif',
             animations: { enabled: true }
         },
         series: seriesData,
         labels: labelsData,
         colors: colorsData,
-        stroke: { show: true, width: 2, colors: ['#1e293b'] },
+        stroke: { show: true, width: 2, colors: ['#ffffff'] },
         dataLabels: {
             enabled: true,
             minAngleToShowLabel: 12,
@@ -1375,7 +1375,7 @@ function renderPortfolioPieChart(categoryTotals, stockTotals, totalEval) {
             horizontalAlign: isStockView ? 'left' : 'center',
             fontSize: '11px',
             maxHeight: isStockView ? 190 : 75,
-            labels: { colors: '#cbd5e1' },
+            labels: { colors: '#0f172a' },
             itemMargin: { horizontal: 6, vertical: 3 },
             markers: { width: 8, height: 8, radius: 8 }
         },
@@ -1396,14 +1396,14 @@ function renderPortfolioPieChart(categoryTotals, stockTotals, totalEval) {
                         name: {
                             show: true,
                             fontSize: '12px',
-                            color: '#94a3b8',
+                            color: '#64748b',
                             offsetY: -4
                         },
                         value: {
                             show: true,
                             fontSize: '15px',
                             fontWeight: '700',
-                            color: '#f8fafc',
+                            color: '#0f172a',
                             offsetY: 4
                         },
                         total: {
@@ -1411,7 +1411,7 @@ function renderPortfolioPieChart(categoryTotals, stockTotals, totalEval) {
                             showAlways: true,
                             label: isStockView ? '보유 자산' : '총 섹션 자산',
                             fontSize: '12px',
-                            color: '#94a3b8',
+                            color: '#475569',
                             formatter: function (w) {
                                 const total = w.globals.seriesTotals.reduce((a, b) => a + b, 0);
                                 return Math.round(total).toLocaleString() + '원';
