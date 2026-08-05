@@ -990,6 +990,15 @@ def calculate_macd(prices):
     return macd_line, signal_line, histogram
 
 
+NAVER_SYMBOL_MAP = {
+    "KOSPI": "KOSPI",
+    "KOSDAQ": "KOSDAQ",
+    "NASDAQ": "NAS@IXIC",
+    "USDKRW": "FX_USDKRW",
+    "OIL_CL": "OIL_CL",
+    "CMDT_GC": "CMDT_GC"
+}
+
 YAHOO_SYMBOLS = {
     "NASDAQ": "^IXIC",
     "USDKRW": "USDKRW=X",
@@ -1000,94 +1009,116 @@ YAHOO_SYMBOLS = {
 def fetch_stock_chart(code: str):
     candles = []
     
-    # 해외 주식 판별 (길이가 6이 아니거나 첫 자리가 숫자가 아님)
-    is_us_stock = False
-    if code not in VALID_INDICES:
-        if len(code) != 6 or not code[0].isdigit():
-            is_us_stock = True
+    # 1. 네이버 금융 지수/환율/원자재(KOSPI, KOSDAQ, NASDAQ, USDKRW, OIL_CL, CMDT_GC) 일봉 조회 시도
+    symbol_to_fetch = NAVER_SYMBOL_MAP.get(code, code)
+    if code in NAVER_SYMBOL_MAP:
+        try:
+            url = f"https://fchart.stock.naver.com/sise.nhn?symbol={symbol_to_fetch}&timeframe=day&count=600&requestType=0"
+            res = requests.get(url, headers=HEADERS, timeout=5)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, 'html.parser')
+                items = soup.select('item')
+                for item in items:
+                    data = item.get('data', '').split('|')
+                    if len(data) == 6:
+                        raw_date = data[0]
+                        formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+                        candles.append({
+                            'time': formatted_date,
+                            'open': float(data[1]),
+                            'high': float(data[2]),
+                            'low': float(data[3]),
+                            'close': float(data[4]),
+                            'volume': float(data[5])
+                        })
+        except Exception as e:
+            print(f"네이버 지수 차트 조회 실패 ({code}):", e)
+            candles = []
 
-    if code in YAHOO_SYMBOLS or is_us_stock:
-        # 야후 파이낸스 API로부터 1년치 일봉 데이터 조회
-        yahoo_sym = YAHOO_SYMBOLS[code] if code in YAHOO_SYMBOLS else code.upper()
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}?interval=1d&range=1y"
-        yahoo_headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-            'Referer': 'https://finance.yahoo.com/'
-        }
-        res = requests.get(url, headers=yahoo_headers, timeout=5)
-        if res.status_code != 200:
-            raise Exception(f"Yahoo Finance API error: status {res.status_code}")
-            
-        data = res.json()
-        result_list = data.get('chart', {}).get('result', [])
-        if not result_list:
-            raise Exception("Yahoo Finance returns empty results")
-            
-        result = result_list[0]
-        timestamps = result.get('timestamp', [])
-        quote = result.get('indicators', {}).get('quote', [{}])[0]
-        
-        opens = quote.get('open', [])
-        highs = quote.get('high', [])
-        lows = quote.get('low', [])
-        closes = quote.get('close', [])
-        volumes = quote.get('volume', [])
-        
-        for idx, ts in enumerate(timestamps):
-            o = opens[idx] if idx < len(opens) else None
-            h = highs[idx] if idx < len(highs) else None
-            l = lows[idx] if idx < len(lows) else None
-            c = closes[idx] if idx < len(closes) else None
-            v = volumes[idx] if idx < len(volumes) and volumes[idx] is not None else 0
-            
-            # 모든 값이 None인 경우 무시
-            if o is None and h is None and l is None and c is None:
-                continue
-                
-            # 일부 필드만 누락된 경우 이전 캔들의 종가 등으로 폴백 보정
-            if o is None or h is None or l is None or c is None:
-                prev_close = candles[-1]['close'] if candles else None
-                if prev_close is not None:
-                    o = o if o is not None else prev_close
-                    h = h if h is not None else prev_close
-                    l = l if l is not None else prev_close
-                    c = c if c is not None else prev_close
-                else:
-                    # 첫 캔들인데 누락된 경우 스킵
-                    continue
-                
-            date_str = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
-            candles.append({
-                'time': date_str,
-                'open': float(o),
-                'high': float(h),
-                'low': float(l),
-                'close': float(c),
-                'volume': float(v)
-            })
-    else:
-        # 기존 네이버 금융 일봉 시세 조회 (KOSPI, KOSDAQ 및 국내주식)
-        url = f"https://fchart.stock.naver.com/sise.nhn?symbol={code}&timeframe=day&count=600&requestType=0"
-        res = requests.get(url, headers=HEADERS, timeout=5)
-        if res.status_code != 200:
-            raise Exception("차트 시세 조회 실패")
-            
-        soup = BeautifulSoup(res.text, 'html.parser')
-        items = soup.select('item')
-        
-        for item in items:
-            data = item.get('data', '').split('|')
-            if len(data) == 6:
-                raw_date = data[0]
-                formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
-                candles.append({
-                    'time': formatted_date,
-                    'open': float(data[1]),
-                    'high': float(data[2]),
-                    'low': float(data[3]),
-                    'close': float(data[4]),
-                    'volume': float(data[5])
-                })
+    # 2. 만약 지수 데이터가 비어있거나 해외 주식인 경우 야후 파이낸스 폴백 시도
+    if not candles:
+        is_us_stock = False
+        if code not in VALID_INDICES:
+            if len(code) != 6 or not code[0].isdigit():
+                is_us_stock = True
+
+        if code in YAHOO_SYMBOLS or is_us_stock:
+            try:
+                yahoo_sym = YAHOO_SYMBOLS[code] if code in YAHOO_SYMBOLS else code.upper()
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}?interval=1d&range=1y"
+                yahoo_headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Referer': 'https://finance.yahoo.com/'
+                }
+                res = requests.get(url, headers=yahoo_headers, timeout=5)
+                if res.status_code == 200:
+                    data = res.json()
+                    result_list = data.get('chart', {}).get('result', [])
+                    if result_list:
+                        result = result_list[0]
+                        timestamps = result.get('timestamp', [])
+                        quote = result.get('indicators', {}).get('quote', [{}])[0]
+                        
+                        opens = quote.get('open', [])
+                        highs = quote.get('high', [])
+                        lows = quote.get('low', [])
+                        closes = quote.get('close', [])
+                        volumes = quote.get('volume', [])
+                        
+                        for idx, ts in enumerate(timestamps):
+                            o = opens[idx] if idx < len(opens) else None
+                            h = highs[idx] if idx < len(highs) else None
+                            l = lows[idx] if idx < len(lows) else None
+                            c = closes[idx] if idx < len(closes) else None
+                            v = volumes[idx] if idx < len(volumes) and volumes[idx] is not None else 0
+                            
+                            if o is None and h is None and l is None and c is None:
+                                continue
+                                
+                            if o is None or h is None or l is None or c is None:
+                                prev_close = candles[-1]['close'] if candles else None
+                                if prev_close is not None:
+                                    o = o if o is not None else prev_close
+                                    h = h if h is not None else prev_close
+                                    l = l if l is not None else prev_close
+                                    c = c if c is not None else prev_close
+                                else:
+                                    continue
+                                
+                            date_str = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
+                            candles.append({
+                                'time': date_str,
+                                'open': float(o),
+                                'high': float(h),
+                                'low': float(l),
+                                'close': float(c),
+                                'volume': float(v)
+                            })
+            except Exception as e:
+                print(f"야후 파이낸스 차트 조회 실패 ({code}):", e)
+
+    # 3. 일반 국내 주식 네이버 fchart 조회
+    if not candles:
+        try:
+            url = f"https://fchart.stock.naver.com/sise.nhn?symbol={code}&timeframe=day&count=600&requestType=0"
+            res = requests.get(url, headers=HEADERS, timeout=5)
+            if res.status_code == 200:
+                soup = BeautifulSoup(res.text, 'html.parser')
+                items = soup.select('item')
+                for item in items:
+                    data = item.get('data', '').split('|')
+                    if len(data) == 6:
+                        raw_date = data[0]
+                        formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+                        candles.append({
+                            'time': formatted_date,
+                            'open': float(data[1]),
+                            'high': float(data[2]),
+                            'low': float(data[3]),
+                            'close': float(data[4]),
+                            'volume': float(data[5])
+        except Exception as e:
+            print(f"국내주식 네이버 차트 조회 실패 ({code}):", e)
             
     if not candles:
         raise Exception("차트 데이터가 비어있음")

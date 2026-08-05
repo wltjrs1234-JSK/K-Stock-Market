@@ -511,7 +511,40 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         });
     }
+
+    // 8. 상단 경제 지표 카드(코스피, 코스닥, 환율, 나스닥, WTI, 골드) 클릭 시 차트 불러오기 바인딩
+    bindIndexTriggerCards();
 });
+
+// 상단 지수 카드 클릭 이벤트 바인딩
+function bindIndexTriggerCards() {
+    const triggerCards = document.querySelectorAll('.index-trigger-card');
+    triggerCards.forEach(card => {
+        card.addEventListener('click', async () => {
+            const code = card.getAttribute('data-code');
+            if (!code) return;
+
+            selectedStockCode = code;
+            
+            // 관심종목 테이블 행 선택 해제
+            document.querySelectorAll('#watchlist-tbody tr').forEach(r => r.classList.remove('active-row'));
+
+            // 해당 지수/환율/원자재 상세 시세 카드 표시
+            try {
+                const res = await fetch(`/api/stock/${code}`);
+                if (res.ok) {
+                    const stock = await res.json();
+                    renderStockDetails(stock);
+                }
+            } catch (e) {
+                console.error("지수 상세 정보 조회 실패:", e);
+            }
+
+            // 차트 갱신
+            updateStockChart(code);
+        });
+    });
+}
 
 // VS Code 위장용 행 번호 생성
 function generateLineNumbers() {
