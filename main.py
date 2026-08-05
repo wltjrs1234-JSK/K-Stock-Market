@@ -71,6 +71,7 @@ class WatchlistItem(BaseModel):
     code: str
     avgPrice: float
     quantity: float = 0.0  # 소수점 4자리 지원을 위해 float으로 수정
+    category: str = "etc"  # 4대 자산 섹션 카테고리 (snp500, nasdaq, dividend, gold, etc)
 
 class Account(BaseModel):
     id: str
@@ -95,7 +96,8 @@ def load_watchlist():
                             migrated_watchlist.append({
                                 "code": item.get("code", ""),
                                 "avgPrice": float(item.get("avgPrice", 0.0)),
-                                "quantity": float(item.get("quantity", 0.0))
+                                "quantity": float(item.get("quantity", 0.0)),
+                                "category": item.get("category", "etc")
                             })
                     migrated_data = {
                         "accounts": [
@@ -118,7 +120,8 @@ def load_watchlist():
                             wl.append({
                                 "code": item.get("code", ""),
                                 "avgPrice": float(item.get("avgPrice", 0.0)),
-                                "quantity": float(item.get("quantity", 0.0))
+                                "quantity": float(item.get("quantity", 0.0)),
+                                "category": item.get("category", "etc")
                             })
                         accounts.append({
                             "id": acc.get("id", "default_acc"),
@@ -235,8 +238,9 @@ def start_stocks_updater():
     t.start()
 
 
-def get_cached_or_fetch(cache_key: str, fetch_func):
+def get_cached_or_fetch(cache_key: str, fetch_func, ttl_seconds: float = None):
     now = time.time()
+    expire_sec = ttl_seconds if ttl_seconds is not None else CACHE_EXPIRE_SECONDS
     if cache_key in CACHE:
         val, expire_time = CACHE[cache_key]
         if now < expire_time:
@@ -245,7 +249,7 @@ def get_cached_or_fetch(cache_key: str, fetch_func):
     # 캐시 만료되었거나 없을 시 새로 패치
     try:
         data = fetch_func()
-        CACHE[cache_key] = (data, now + CACHE_EXPIRE_SECONDS)
+        CACHE[cache_key] = (data, now + expire_sec)
         return data
     except Exception as e:
         # 패치 실패 시 기존 캐시가 있다면 리턴, 없으면 예외 발생
@@ -1006,7 +1010,10 @@ def fetch_stock_chart(code: str):
         # 야후 파이낸스 API로부터 1년치 일봉 데이터 조회
         yahoo_sym = YAHOO_SYMBOLS[code] if code in YAHOO_SYMBOLS else code.upper()
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}?interval=1d&range=1y"
-        yahoo_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        yahoo_headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Referer': 'https://finance.yahoo.com/'
+        }
         res = requests.get(url, headers=yahoo_headers, timeout=5)
         if res.status_code != 200:
             raise Exception(f"Yahoo Finance API error: status {res.status_code}")
@@ -1027,14 +1034,27 @@ def fetch_stock_chart(code: str):
         volumes = quote.get('volume', [])
         
         for idx, ts in enumerate(timestamps):
-            o = opens[idx]
-            h = highs[idx]
-            l = lows[idx]
-            c = closes[idx]
+            o = opens[idx] if idx < len(opens) else None
+            h = highs[idx] if idx < len(highs) else None
+            l = lows[idx] if idx < len(lows) else None
+            c = closes[idx] if idx < len(closes) else None
             v = volumes[idx] if idx < len(volumes) and volumes[idx] is not None else 0
             
-            if o is None or h is None or l is None or c is None:
+            # 모든 값이 None인 경우 무시
+            if o is None and h is None and l is None and c is None:
                 continue
+                
+            # 일부 필드만 누락된 경우 이전 캔들의 종가 등으로 폴백 보정
+            if o is None or h is None or l is None or c is None:
+                prev_close = candles[-1]['close'] if candles else None
+                if prev_close is not None:
+                    o = o if o is not None else prev_close
+                    h = h if h is not None else prev_close
+                    l = l if l is not None else prev_close
+                    c = c if c is not None else prev_close
+                else:
+                    # 첫 캔들인데 누락된 경우 스킵
+                    continue
                 
             date_str = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
             candles.append({
@@ -1115,8 +1135,10 @@ def get_stock_chart(code: str):
     if not is_valid_code:
         raise HTTPException(status_code=400, detail="유효한 종목 코드 또는 티커를 입력해주세요.")
     try:
-        return get_cached_or_fetch(f"chart_{code}", lambda: fetch_stock_chart(code))
+        # 차트 데이터는 10분(600초) 캐싱 적용하여 로딩 속도 극대화
+        return get_cached_or_fetch(f"chart_{code}", lambda: fetch_stock_chart(code), 600)
     except Exception as e:
+        print(f"[{code}] 차트 데이터 fetch 에러 발생: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

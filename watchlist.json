@@ -7,57 +7,80 @@
         {
           "code": "069500",
           "avgPrice": 96454.0,
-          "quantity": 59.0
+          "quantity": 59.0,
+          "category": "etc"
         },
         {
           "code": "0183J0",
-          "avgPrice": 13814.0,
-          "quantity": 132.0
+          "avgPrice": 14376.0,
+          "quantity": 153.0,
+          "category": "etc"
         },
         {
           "code": "360200",
-          "avgPrice": 22062.0,
-          "quantity": 305.0
+          "avgPrice": 22410.0,
+          "quantity": 326.0,
+          "category": "snp500"
         },
         {
           "code": "360750",
           "avgPrice": 18528.0,
-          "quantity": 256.0
+          "quantity": 256.0,
+          "category": "snp500"
         },
         {
           "code": "367380",
-          "avgPrice": 23557.0,
-          "quantity": 233.0
+          "avgPrice": 25311.0,
+          "quantity": 283.0,
+          "category": "nasdaq"
         },
         {
           "code": "133690",
           "avgPrice": 107900.0,
-          "quantity": 1.0
+          "quantity": 1.0,
+          "category": "nasdaq"
         },
         {
           "code": "466940",
           "avgPrice": 15459.0,
-          "quantity": 66.0
+          "quantity": 66.0,
+          "category": "dividend"
         },
         {
           "code": "319640",
           "avgPrice": 21606.0,
-          "quantity": 186.0
+          "quantity": 186.0,
+          "category": "gold"
         },
         {
           "code": "465580",
           "avgPrice": 19108.0,
-          "quantity": 82.0
+          "quantity": 82.0,
+          "category": "nasdaq"
         },
         {
           "code": "458730",
           "avgPrice": 12411.0,
-          "quantity": 74.0
+          "quantity": 74.0,
+          "category": "dividend"
         },
         {
           "code": "489250",
           "avgPrice": 10667.0,
-          "quantity": 44.0
+          "quantity": 44.0,
+          "category": "dividend"
+        },
+        {
+          "code": "381180",
+          "avgPrice": 56152.0,
+          "quantity": 19.0,
+          "category": "etc"
+        },
+        {
+          "code": "476550",
+          "avgPrice": 9475.0,
+          "quantity": 30.0,
+          "category": "etc"
         }
       ]
     },
@@ -67,58 +90,81 @@
       "watchlist": [
         {
           "code": "466940",
-          "avgPrice": 17381.0,
-          "quantity": 101.0
+          "avgPrice": 17599.0,
+          "quantity": 104.0,
+          "category": "dividend"
         },
         {
           "code": "458730",
           "avgPrice": 11633.0,
-          "quantity": 105.0
+          "quantity": 105.0,
+          "category": "dividend"
         },
         {
           "code": "069500",
           "avgPrice": 114496.0,
-          "quantity": 19.0
+          "quantity": 19.0,
+          "category": "etc"
         },
         {
           "code": "360200",
-          "avgPrice": 23045.0,
-          "quantity": 34.0
+          "avgPrice": 23516.0,
+          "quantity": 38.0,
+          "category": "snp500"
         },
         {
           "code": "441640",
-          "avgPrice": 12013.0,
-          "quantity": 105.0
+          "avgPrice": 12061.0,
+          "quantity": 109.0,
+          "category": "dividend"
         },
         {
           "code": "091160",
           "avgPrice": 151899.0,
-          "quantity": 7.0
+          "quantity": 7.0,
+          "category": "etc"
         },
         {
           "code": "489250",
           "avgPrice": 10909.0,
-          "quantity": 22.0
+          "quantity": 22.0,
+          "category": "dividend"
         },
         {
           "code": "319640",
           "avgPrice": 25286.0,
-          "quantity": 30.0
+          "quantity": 30.0,
+          "category": "gold"
         },
         {
           "code": "458760",
           "avgPrice": 10373.0,
-          "quantity": 34.0
+          "quantity": 34.0,
+          "category": "dividend"
         },
         {
           "code": "360750",
           "avgPrice": 20874.0,
-          "quantity": 4.0
+          "quantity": 4.0,
+          "category": "snp500"
         },
         {
           "code": "411060",
           "avgPrice": 32050.0,
-          "quantity": 2.0
+          "quantity": 2.0,
+          "category": "gold"
+        },
+        {
+          "code": "367380",
+          "avgPrice": 33727.0,
+          "quantity": 22.9999,
+          "category": "nasdaq"
+        },
+        {
+          "code": "381180",
+          "avgPrice": 57168.0,
+          "quantity": 18.0,
+          "category": "etc"
         }
       ]
     },
@@ -129,47 +175,56 @@
         {
           "code": "NVDA",
           "avgPrice": 244069.0,
-          "quantity": 20.6792
+          "quantity": 20.6792,
+          "category": "etc"
         },
         {
           "code": "MSFT",
           "avgPrice": 649621.0,
-          "quantity": 12.89807
+          "quantity": 12.89807,
+          "category": "etc"
         },
         {
           "code": "AAPL",
           "avgPrice": 333313.0,
-          "quantity": 5.90083
+          "quantity": 5.90083,
+          "category": "etc"
         },
         {
           "code": "PLTR",
           "avgPrice": 240445.0,
-          "quantity": 15.45886
+          "quantity": 15.45886,
+          "category": "etc"
         },
         {
           "code": "SOXX",
           "avgPrice": 887374.0,
-          "quantity": 2.0
+          "quantity": 2.0,
+          "category": "etc"
         },
         {
           "code": "LITE",
           "avgPrice": 1464012.0,
-          "quantity": 1.0
+          "quantity": 1.0,
+          "category": "etc"
         },
         {
           "code": "SNDK",
           "avgPrice": 2250970.0,
-          "quantity": 1.0
+          "quantity": 1.0,
+          "category": "etc"
         },
         {
           "code": "EWY",
           "avgPrice": 263076.0,
-          "quantity": 7.0
+          "quantity": 7.0,
+          "category": "etc"
         },
         {
           "code": "GEV",
           "avgPrice": 972326.0,
-          "quantity": 1.153
+          "quantity": 1.153,
+          "category": "etc"
         }
       ]
     },
@@ -180,17 +235,50 @@
         {
           "code": "005930",
           "avgPrice": 0.0,
-          "quantity": 0.0
+          "quantity": 0.0,
+          "category": "etc"
         },
         {
           "code": "000660",
           "avgPrice": 0.0,
-          "quantity": 0.0
+          "quantity": 0.0,
+          "category": "etc"
         },
         {
           "code": "449450",
           "avgPrice": 0.0,
-          "quantity": 0.0
+          "quantity": 0.0,
+          "category": "etc"
+        },
+        {
+          "code": "009150",
+          "avgPrice": 0.0,
+          "quantity": 0.0,
+          "category": "etc"
+        },
+        {
+          "code": "005380",
+          "avgPrice": 0.0,
+          "quantity": 0.0,
+          "category": "etc"
+        },
+        {
+          "code": "402340",
+          "avgPrice": 0.0,
+          "quantity": 0.0,
+          "category": "etc"
+        },
+        {
+          "code": "035420",
+          "avgPrice": 0.0,
+          "quantity": 0.0,
+          "category": "etc"
+        },
+        {
+          "code": "307950",
+          "avgPrice": 0.0,
+          "quantity": 0.0,
+          "category": "etc"
         }
       ]
     }

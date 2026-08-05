@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Outfit:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/style.css?v=3.3.0">
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 </head>
@@ -189,6 +189,123 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 신규: 4대 자산 섹션 분석 및 파이 차트 패널 -->
+            <div class="asset-analysis-container">
+                <div class="asset-analysis-header">
+                    <div class="analysis-title">
+                        <i class="fa-solid fa-chart-pie text-accent"></i>
+                        <h2>포트폴리오 자산 비중 & 섹션 분석</h2>
+                    </div>
+                    <div class="pie-toggle-tabs">
+                        <button type="button" class="pie-tab-btn active" id="btn-pie-category" data-view="category">
+                            <i class="fa-solid fa-layer-group"></i> 4대 섹션별 비중
+                        </button>
+                        <button type="button" class="pie-tab-btn" id="btn-pie-stock" data-view="stock">
+                            <i class="fa-solid fa-chart-simple"></i> 종목별 비중
+                        </button>
+                    </div>
+                </div>
+
+                <div class="asset-analysis-body">
+                    <!-- 좌측: 파이차트 시각화 영역 -->
+                    <div class="pie-chart-wrapper glass-card">
+                        <div id="portfolio-pie-chart" class="pie-chart-container">
+                            <div class="chart-loading-placeholder">
+                                <i class="fa-solid fa-chart-pie fa-spin"></i> 자산 데이터를 계산하는 중입니다...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 우측: 4대 핵심 투자 섹션 디스플레이 카드 -->
+                    <div class="section-cards-grid">
+                        <!-- S&P500 섹션 -->
+                        <div class="section-stat-card snp500-card">
+                            <div class="sec-card-header">
+                                <span class="sec-badge badge-snp500"><i class="fa-solid fa-flag-usa"></i> S&P 500</span>
+                                <span class="sec-ratio-tag" id="ratio-snp500">0.0%</span>
+                            </div>
+                            <div class="sec-card-body">
+                                <div class="sec-val-row">
+                                    <span class="sec-label">평가 금액</span>
+                                    <span class="sec-val" id="val-snp500">0 원</span>
+                                </div>
+                                <div class="sec-stocks-list" id="stocks-snp500">
+                                    <span class="no-stocks">지정된 종목 없음</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 나스닥 섹션 -->
+                        <div class="section-stat-card nasdaq-card">
+                            <div class="sec-card-header">
+                                <span class="sec-badge badge-nasdaq"><i class="fa-solid fa-microchip"></i> 나스닥</span>
+                                <span class="sec-ratio-tag" id="ratio-nasdaq">0.0%</span>
+                            </div>
+                            <div class="sec-card-body">
+                                <div class="sec-val-row">
+                                    <span class="sec-label">평가 금액</span>
+                                    <span class="sec-val" id="val-nasdaq">0 원</span>
+                                </div>
+                                <div class="sec-stocks-list" id="stocks-nasdaq">
+                                    <span class="no-stocks">지정된 종목 없음</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 배당주 섹션 -->
+                        <div class="section-stat-card dividend-card">
+                            <div class="sec-card-header">
+                                <span class="sec-badge badge-dividend"><i class="fa-solid fa-hand-holding-dollar"></i> 배당주</span>
+                                <span class="sec-ratio-tag" id="ratio-dividend">0.0%</span>
+                            </div>
+                            <div class="sec-card-body">
+                                <div class="sec-val-row">
+                                    <span class="sec-label">평가 금액</span>
+                                    <span class="sec-val" id="val-dividend">0 원</span>
+                                </div>
+                                <div class="sec-stocks-list" id="stocks-dividend">
+                                    <span class="no-stocks">지정된 종목 없음</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 금 투자 섹션 -->
+                        <div class="section-stat-card gold-card">
+                            <div class="sec-card-header">
+                                <span class="sec-badge badge-gold"><i class="fa-solid fa-coins"></i> 금 투자</span>
+                                <span class="sec-ratio-tag" id="ratio-gold">0.0%</span>
+                            </div>
+                            <div class="sec-card-body">
+                                <div class="sec-val-row">
+                                    <span class="sec-label">평가 금액</span>
+                                    <span class="sec-val" id="val-gold">0 원</span>
+                                </div>
+                                <div class="sec-stocks-list" id="stocks-gold">
+                                    <span class="no-stocks">지정된 종목 없음</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 기타 투자 섹션 -->
+                        <div class="section-stat-card etc-card">
+                            <div class="sec-card-header">
+                                <span class="sec-badge badge-etc"><i class="fa-solid fa-shapes"></i> 기타 자산</span>
+                                <span class="sec-ratio-tag" id="ratio-etc">0.0%</span>
+                            </div>
+                            <div class="sec-card-body">
+                                <div class="sec-val-row">
+                                    <span class="sec-label">평가 금액</span>
+                                    <span class="sec-val" id="val-etc">0 원</span>
+                                </div>
+                                <div class="sec-stocks-list" id="stocks-etc">
+                                    <span class="no-stocks">지정된 종목 없음</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <!-- 메인 콘텐츠 영역 (관심종목 테이블 & 종목 상세) -->
@@ -236,6 +353,7 @@
                             <thead>
                                 <tr>
                                     <th style="width: 40px; text-align: center;"></th>
+                                    <th>섹션 (투자 지수)</th>
                                     <th>종목명</th>
                                     <th>코드</th>
                                     <th>현재가</th>
@@ -310,7 +428,7 @@
                             </div>
                         </div>
                         <div id="stock-chart" class="stock-chart-container" style="position: relative; margin-top: 10px; border-radius: 8px; background: rgba(0,0,0,0.2);">
-                            <div id="chart-placeholder" class="chart-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: var(--text-secondary); font-size: 0.85rem;">
+                            <div id="chart-placeholder" class="chart-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 0.85rem; pointer-events: none;">
                                 종목을 선택하면 일봉 차트(거래량/RSI 세로 분리)가 하단에 와이드 형태로 로드됩니다.
                             </div>
                             <div id="chart-panes-wrapper" class="hidden" style="width: 100%; display: flex; flex-direction: column; gap: 2px; padding: 4px;">
@@ -518,7 +636,6 @@ setInterval(stockEngine, <span class="code-number">3000</span>);
         </div>
     </div>
 
-    <!-- 스크립트 로드 -->
-    <script src="/app.js?v=2.5.0"></script>
+    <script src="/app.js?v=3.3.0"></script>
 </body>
 </html>

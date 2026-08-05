@@ -35,7 +35,13 @@ function isUsStock(code) {
 let candleChart = null;
 let volumeChart = null;
 let rsiChart = null;
+let portfolioPieChart = null; // 자산 비중 파이 차트 인스턴스
+let pieChartView = 'category'; // 'category' (4대 섹션) 또는 'stock' (종목별)
+
 let isDraggingWatchlist = false; // 관심종목 드래그 정렬 시 폴링 일시중단용 플래그
+let latestRequestedChartCode = ''; // 가장 최근 요청된 차트 종목 코드 (Race Condition 방지용)
+
+
 
 // 서버로부터 관심종목 데이터 불러오기 (비동기)
 async function loadWatchlistFromServer() {
@@ -99,10 +105,14 @@ function initializeCurrentAccount() {
             currentAccountId = watchlist.accounts[0].id;
         }
         
-        // 첫 번째 계좌의 첫 번째 종목 코드 설정
         const activeAcc = watchlist.accounts.find(acc => acc.id === currentAccountId);
-        if (activeAcc && activeAcc.watchlist.length > 0 && !selectedStockCode) {
-            selectedStockCode = activeAcc.watchlist[0].code;
+        if (activeAcc) {
+            if (activeAcc.name && (activeAcc.name.includes('직투') || activeAcc.name.includes('개별'))) {
+                pieChartView = 'stock';
+            }
+            if (activeAcc.watchlist.length > 0 && !selectedStockCode) {
+                selectedStockCode = activeAcc.watchlist[0].code;
+            }
         }
     }
 }
@@ -145,6 +155,17 @@ function renderAccountTabs() {
             if (currentAccountId === acc.id) return;
             currentAccountId = acc.id;
             
+            // 직투 계좌인 경우 기본으로 종목별 비중 탭 선택
+            if (acc.name && (acc.name.includes('직투') || acc.name.includes('개별'))) {
+                pieChartView = 'stock';
+                const btnCat = document.getElementById('btn-pie-category');
+                const btnStk = document.getElementById('btn-pie-stock');
+                if (btnCat && btnStk) {
+                    btnStk.classList.add('active');
+                    btnCat.classList.remove('active');
+                }
+            }
+
             // 탭 스타일 변경
             document.querySelectorAll('.account-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
@@ -261,6 +282,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 1.2 계좌 관리 탭 바인딩 및 렌더링
     renderAccountTabs();
     initAccountEvents();
+    initPieChartTabs();
 
     // 2. 초기 데이터 즉시 갱신
     updateMarketSummary();
@@ -701,10 +723,17 @@ async function updateWatchlistData() {
             }
             previousPrices[stock.code] = stock.price;
 
-            // 현재 계좌의 평단가 및 보유 수량 정보 매핑
+            // 현재 계좌의 평단가, 보유 수량, 섹션 카테고리 정보 매핑
             const watchItem = activeWatchlist.find(w => w.code === stock.code);
             const avgPrice = watchItem ? watchItem.avgPrice : 0;
             const quantity = watchItem ? (watchItem.quantity || 0) : 0;
+            
+            // 카테고리(섹션) 수동 선택 정보 매핑 (미지정 시 'etc')
+            let category = (watchItem && watchItem.category) ? watchItem.category : 'etc';
+            if (watchItem && !watchItem.category) {
+                watchItem.category = 'etc';
+            }
+
             const currentPriceNum = parseFloat(stock.price.replace(/,/g, ''));
             
             let profitRateText = '-';
@@ -732,6 +761,15 @@ async function updateWatchlistData() {
 
             tr.innerHTML = `
                 <td class="drag-handle"><i class="fa-solid fa-grip-lines"></i></td>
+                <td>
+                    <select class="category-select" data-code="${stock.code}">
+                        <option value="etc" ${category === 'etc' ? 'selected' : ''}>📦 미지정 / 기타</option>
+                        <option value="snp500" ${category === 'snp500' ? 'selected' : ''}>🇺🇸 S&P 500</option>
+                        <option value="nasdaq" ${category === 'nasdaq' ? 'selected' : ''}>💻 나스닥</option>
+                        <option value="dividend" ${category === 'dividend' ? 'selected' : ''}>💵 배당주</option>
+                        <option value="gold" ${category === 'gold' ? 'selected' : ''}>🪙 금 투자</option>
+                    </select>
+                </td>
                 <td><strong>${stock.name}</strong></td>
                 <td><span class="stock-code">${stock.code}</span></td>
                 <td class="stock-price ${statusClass} ${flashClass}">${displayPrice}</td>
@@ -755,12 +793,35 @@ async function updateWatchlistData() {
                 </td>
             `;
 
+            // 섹션 셀렉트박스 변경 이벤트 바인딩
+            const selectEl = tr.querySelector('.category-select');
+            if (selectEl) {
+                selectEl.addEventListener('change', (e) => {
+                    const newCat = e.target.value;
+                    if (watchItem) {
+                        watchItem.category = newCat;
+                        saveWatchlistToServer();
+                        updatePortfolioSummary(Object.values(cachedStockData));
+                    }
+                });
+            }
+
             // 클릭 시 디테일 및 차트 활성화
             tr.addEventListener('click', (e) => {
-                if (e.target.closest('.btn-delete') || e.target.closest('.avg-price-cell') || e.target.closest('.quantity-cell') || e.target.closest('.drag-handle')) return;
+                if (e.target.closest('.btn-delete') || e.target.closest('.avg-price-cell') || e.target.closest('.quantity-cell') || e.target.closest('.drag-handle') || e.target.closest('.category-select')) return;
                 
                 selectedStockCode = stock.code;
-                updateWatchlistData(); 
+                
+                // 테이블 활성 행 클래스 수동 업데이트 (오버헤드 방지)
+                document.querySelectorAll('#watchlist-tbody tr').forEach(r => {
+                    r.classList.remove('active-row');
+                });
+                tr.classList.add('active-row');
+                
+                // 이미 전달받은 stock 객체를 이용해 디테일 카드를 즉시 렌더링 (불필요한 fetch 차단)
+                renderStockDetails(stock);
+                
+                // 차트 업데이트
                 updateStockChart(stock.code); 
             });
 
@@ -818,7 +879,7 @@ async function addStockToWatchlist(code) {
             return;
         }
         
-        activeAcc.watchlist.push({ code, avgPrice: 0.0, quantity: 0.0 });
+        activeAcc.watchlist.push({ code, avgPrice: 0.0, quantity: 0.0, category: 'etc' });
         await saveWatchlistToServer();
         selectedStockCode = code; 
         updateWatchlistData();
@@ -1170,6 +1231,229 @@ function updatePortfolioSummary(results) {
             }
         }
     }
+
+    // 3. 4대 투자 섹션별 및 종목별 비중 연산 (파이차트 & 섹션 카드 연동)
+    const categoryTotals = {
+        snp500: { name: 'S&P 500', eval: 0, stocks: [] },
+        nasdaq: { name: '나스닥', eval: 0, stocks: [] },
+        dividend: { name: '배당주', eval: 0, stocks: [] },
+        gold: { name: '금 투자', eval: 0, stocks: [] },
+        etc: { name: '기타 자산', eval: 0, stocks: [] }
+    };
+    
+    const stockTotals = [];
+
+    activeWatchlist.forEach(item => {
+        const stock = results.find(s => s && s.code === item.code);
+        if (stock) {
+            const quantity = item.quantity || 0;
+            const currentPriceNum = parseFloat(stock.price.replace(/,/g, '')) || 0;
+            let cat = item.category || 'etc';
+            if (!categoryTotals[cat]) cat = 'etc';
+
+            let evalVal = 0;
+            if (quantity > 0) {
+                if (isUsStock(item.code)) {
+                    evalVal = currentPriceNum * quantity * usdKrwRate;
+                } else {
+                    evalVal = currentPriceNum * quantity;
+                }
+            }
+
+            categoryTotals[cat].eval += evalVal;
+            categoryTotals[cat].stocks.push({ name: stock.name, code: stock.code, eval: evalVal });
+
+            // 개별 종목 비중 집계 (평가금액이 있으면 평가금액으로, 없는 경우 현재가 기반 또는 기본 비중 적용)
+            const weightVal = evalVal > 0 ? Math.round(evalVal) : (currentPriceNum > 0 ? Math.round(currentPriceNum) : 1);
+            stockTotals.push({ 
+                name: stock.name, 
+                code: stock.code, 
+                eval: weightVal, 
+                realEval: Math.round(evalVal),
+                hasQuantity: evalVal > 0 
+            });
+        }
+    });
+
+    // 4대 섹션 카드 UI 갱신
+    const totalCurrentEvalSum = currentEval > 0 ? currentEval : 1;
+    Object.keys(categoryTotals).forEach(catKey => {
+        const itemData = categoryTotals[catKey];
+        const ratio = currentEval > 0 ? ((itemData.eval / totalCurrentEvalSum) * 100).toFixed(1) : '0.0';
+        
+        const ratioEl = document.getElementById(`ratio-${catKey}`);
+        const valEl = document.getElementById(`val-${catKey}`);
+        const listEl = document.getElementById(`stocks-${catKey}`);
+
+        if (ratioEl) ratioEl.innerText = `${ratio}%`;
+        if (valEl) valEl.innerText = `${Math.round(itemData.eval).toLocaleString()} 원`;
+        if (listEl) {
+            if (itemData.stocks.length === 0) {
+                listEl.innerHTML = '<span class="no-stocks">지정된 종목 없음</span>';
+            } else {
+                listEl.innerHTML = itemData.stocks.map(s => `<span class="stock-mini-chip" title="${s.name}">${s.name}</span>`).join('');
+            }
+        }
+    });
+
+    // 4. ApexCharts 자산 파이차트 렌더링
+    renderPortfolioPieChart(categoryTotals, stockTotals, currentEval);
+}
+
+// 자산 파이차트 ApexCharts 렌더링
+function renderPortfolioPieChart(categoryTotals, stockTotals, totalEval) {
+    const pieContainer = document.getElementById('portfolio-pie-chart');
+    if (!pieContainer) return;
+    if (typeof ApexCharts === 'undefined') return;
+
+    let seriesData = [];
+    let labelsData = [];
+    let colorsData = [];
+
+    const isStockView = pieChartView === 'stock';
+
+    if (pieChartView === 'category') {
+        const catColors = {
+            snp500: '#3b82f6',
+            nasdaq: '#a855f7',
+            dividend: '#22c55e',
+            gold: '#f59e0b',
+            etc: '#94a3b8'
+        };
+        Object.keys(categoryTotals).forEach(catKey => {
+            const catObj = categoryTotals[catKey];
+            if (catObj.eval > 0 || totalEval === 0) {
+                seriesData.push(Math.round(catObj.eval));
+                labelsData.push(catObj.name);
+                colorsData.push(catColors[catKey]);
+            }
+        });
+    } else {
+        const sortedStocks = [...stockTotals].sort((a, b) => b.eval - a.eval);
+        sortedStocks.forEach(s => {
+            seriesData.push(s.eval);
+            // 긴 종목 풀네임 대신 티커/약칭 우선 표시로 범례 공간 압축
+            const displayName = (s.code && s.name.length > 14) ? `${s.code}` : s.name;
+            labelsData.push(displayName);
+        });
+        const defaultPalette = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#6366f1', '#14b8a6', '#f97316'];
+        colorsData = labelsData.map((_, i) => defaultPalette[i % defaultPalette.length]);
+    }
+
+    if (seriesData.length === 0 || seriesData.every(v => v === 0)) {
+        pieContainer.innerHTML = '<div class="chart-loading-placeholder"><i class="fa-solid fa-circle-info"></i> 보유 수량이 등록된 종목이 없습니다.</div>';
+        if (portfolioPieChart) {
+            portfolioPieChart.destroy();
+            portfolioPieChart = null;
+        }
+        return;
+    }
+
+    const options = {
+        chart: {
+            type: 'donut',
+            height: 270,
+            background: 'transparent',
+            foreColor: '#94a3b8',
+            fontFamily: 'Outfit, Noto Sans KR, sans-serif',
+            animations: { enabled: true }
+        },
+        series: seriesData,
+        labels: labelsData,
+        colors: colorsData,
+        stroke: { show: true, width: 2, colors: ['#1e293b'] },
+        dataLabels: {
+            enabled: true,
+            minAngleToShowLabel: 12,
+            formatter: function (val) {
+                return val >= 4 ? val.toFixed(1) + '%' : '';
+            },
+            dropShadow: { enabled: false }
+        },
+        legend: {
+            position: isStockView ? 'right' : 'bottom',
+            horizontalAlign: isStockView ? 'left' : 'center',
+            fontSize: '11px',
+            maxHeight: isStockView ? 190 : 75,
+            labels: { colors: '#cbd5e1' },
+            itemMargin: { horizontal: 6, vertical: 3 },
+            markers: { width: 8, height: 8, radius: 8 }
+        },
+        tooltip: {
+            theme: 'dark',
+            y: {
+                formatter: function (val) {
+                    return val.toLocaleString() + ' 원';
+                }
+            }
+        },
+        plotOptions: {
+            pie: {
+                donut: {
+                    size: '66%',
+                    labels: {
+                        show: true,
+                        name: {
+                            show: true,
+                            fontSize: '12px',
+                            color: '#94a3b8',
+                            offsetY: -4
+                        },
+                        value: {
+                            show: true,
+                            fontSize: '15px',
+                            fontWeight: '700',
+                            color: '#f8fafc',
+                            offsetY: 4
+                        },
+                        total: {
+                            show: true,
+                            showAlways: true,
+                            label: isStockView ? '보유 자산' : '총 섹션 자산',
+                            fontSize: '12px',
+                            color: '#94a3b8',
+                            formatter: function (w) {
+                                const total = w.globals.seriesTotals.reduce((a, b) => a + b, 0);
+                                return Math.round(total).toLocaleString() + '원';
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    if (portfolioPieChart) {
+        portfolioPieChart.updateOptions(options);
+    } else {
+        pieContainer.innerHTML = '';
+        portfolioPieChart = new ApexCharts(pieContainer, options);
+        portfolioPieChart.render();
+    }
+}
+
+// 파이 차트 토글 탭 이벤트 바인딩
+function initPieChartTabs() {
+    const btnCategory = document.getElementById('btn-pie-category');
+    const btnStock = document.getElementById('btn-pie-stock');
+
+    if (btnCategory && btnStock) {
+        btnCategory.addEventListener('click', () => {
+            if (pieChartView === 'category') return;
+            pieChartView = 'category';
+            btnCategory.classList.add('active');
+            btnStock.classList.remove('active');
+            updatePortfolioSummary(Object.values(cachedStockData));
+        });
+
+        btnStock.addEventListener('click', () => {
+            if (pieChartView === 'stock') return;
+            pieChartView = 'stock';
+            btnStock.classList.add('active');
+            btnCategory.classList.remove('active');
+            updatePortfolioSummary(Object.values(cachedStockData));
+        });
+    }
 }
 
 // 4.3 종목 세부정보 렌더링
@@ -1374,22 +1658,68 @@ async function updateStockChart(code) {
         return;
     }
     
+    // 비동기 경합 조건 해결용 전역 요청 변수 업데이트
+    latestRequestedChartCode = code;
+    
     const placeholder = document.getElementById('chart-placeholder');
     const panesWrapper = document.getElementById('chart-panes-wrapper');
     const titleEl = document.getElementById('chart-stock-title');
     
+    // 로딩 인디케이터 표시
+    if (placeholder) {
+        placeholder.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right: 6px;"></i> 차트 데이터를 불러오는 중입니다...';
+        placeholder.classList.remove('hidden');
+    }
+    if (panesWrapper) panesWrapper.classList.add('hidden');
+    
     try {
         const res = await fetch(`/api/stock/${code}/chart`);
         if (!res.ok) throw new Error("Chart data fetch failed");
+        
+        // 1차 Race condition 체크
+        if (latestRequestedChartCode !== code) {
+            console.log(`[Race Condition Shield] Discarded chart response for ${code} as latest requested is ${latestRequestedChartCode}`);
+            return;
+        }
+        
         const chartData = await res.json();
         
         if (!chartData || chartData.length === 0) {
-            clearStockCharts();
+            if (latestRequestedChartCode === code) {
+                clearStockCharts();
+            }
             return;
+        }
+        
+        // 해외 주식이면 차트의 달러 수치 데이터를 전역 실시간 환율(usdKrwRate)을 곱해 원화(KRW)로 환산
+        let processedChartData = chartData;
+        if (isUsStock(code)) {
+            processedChartData = chartData.map(item => ({
+                ...item,
+                open: item.open * usdKrwRate,
+                high: item.high * usdKrwRate,
+                low: item.low * usdKrwRate,
+                close: item.close * usdKrwRate,
+                sma5: item.sma5 !== null && item.sma5 !== undefined ? item.sma5 * usdKrwRate : null,
+                sma10: item.sma10 !== null && item.sma10 !== undefined ? item.sma10 * usdKrwRate : null,
+                sma20: item.sma20 !== null && item.sma20 !== undefined ? item.sma20 * usdKrwRate : null,
+                sma60: item.sma60 !== null && item.sma60 !== undefined ? item.sma60 * usdKrwRate : null,
+                sma120: item.sma120 !== null && item.sma120 !== undefined ? item.sma120 * usdKrwRate : null,
+                macd: item.macd !== null && item.macd !== undefined ? item.macd * usdKrwRate : null,
+                macd_signal: item.macd_signal !== null && item.macd_signal !== undefined ? item.macd_signal * usdKrwRate : null,
+                macd_hist: item.macd_hist !== null && item.macd_hist !== undefined ? item.macd_hist * usdKrwRate : null
+            }));
         }
         
         // 종목명 매핑
         const stockRes = await fetch(`/api/stock/${code}`).catch(() => null);
+        
+        // 2차 Race condition 체크
+        if (latestRequestedChartCode !== code) {
+            console.log(`[Race Condition Shield] Discarded name response for ${code}`);
+            return;
+        }
+        
         const stockName = stockRes && stockRes.ok ? (await stockRes.json()).name : code;
         if (titleEl) {
             titleEl.innerText = `${stockName} (${code}) 일봉 차트`;
@@ -1401,12 +1731,21 @@ async function updateStockChart(code) {
         
         // 브라우저 Reflow 대응 지연 호출
         setTimeout(() => {
-            renderChartsActual(chartData, stockName, code);
+            // 최종 렌더링 전 다시 한 번 검증
+            if (latestRequestedChartCode === code) {
+                renderChartsActual(processedChartData, stockName, code);
+            }
         }, 50);
         
     } catch (err) {
         console.error("Chart load error:", err);
-        clearStockCharts();
+        // 최종 요청 코드와 일치할 때만 클리어 처리
+        if (latestRequestedChartCode === code) {
+            clearStockCharts();
+            if (placeholder) {
+                placeholder.innerHTML = '차트 데이터를 불러오는 데 실패했습니다. 다시 시도해 주세요.';
+            }
+        }
     }
 }
 
@@ -1418,6 +1757,8 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
         xaxis: [],
         points: []
     };
+
+    const isUs = currentStock ? isUsStock(currentStock.code) : false;
 
     // 1. 내 평단가 기준선 (존재하는 경우)
     if (avgPrice > 0) {
@@ -1434,15 +1775,24 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
                     fontSize: '10px',
                     fontWeight: 700
                 },
-                text: `내 평단: ${avgPrice.toLocaleString()}원`
+                text: `내 평단: ${Math.round(avgPrice).toLocaleString()}원`
             }
         });
     }
 
     // 2. 현재가 기준선 및 Y축 말풍선
     if (currentStock) {
-        const currentPriceNum = parseFloat(currentStock.price.replace(/,/g, ''));
+        let currentPriceNum = parseFloat(currentStock.price.replace(/,/g, ''));
+        if (isUs) {
+            currentPriceNum = currentPriceNum * usdKrwRate;
+        }
         const statusColor = currentStock.status === 'UP' ? '#ef4444' : currentStock.status === 'DOWN' ? '#3b82f6' : '#94a3b8';
+        
+        let displayText = `${currentStock.price} (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
+        if (isUs) {
+            displayText = `₩${Math.round(currentPriceNum).toLocaleString()} (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
+        }
+
         annotations.yaxis.push({
             y: currentPriceNum,
             borderColor: statusColor,
@@ -1456,7 +1806,7 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
                     fontSize: '10px',
                     fontWeight: 700
                 },
-                text: `${currentStock.price} (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`
+                text: displayText
             }
         });
     }
@@ -1498,7 +1848,7 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
                         fontSize: '9px',
                         fontWeight: '700'
                     },
-                    text: `▲ ${highest.high.toLocaleString()} (${highestDateFormatted}) +${highestRate}%`,
+                    text: `▲ ${Math.round(highest.high).toLocaleString()}원 (${highestDateFormatted}) +${highestRate}%`,
                     offsetY: -15
                 }
             });
@@ -1521,7 +1871,7 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
                         fontSize: '9px',
                         fontWeight: '700'
                     },
-                    text: `▼ ${lowest.low.toLocaleString()} (${lowestDateFormatted}) ${lowestRate}%`,
+                    text: `▼ ${Math.round(lowest.low).toLocaleString()}원 (${lowestDateFormatted}) ${lowestRate}%`,
                     offsetY: 15
                 }
             });
@@ -1609,8 +1959,8 @@ async function renderChartsActual(chartData, stockName, code) {
     
     if (!candlePane || !volumePane || !rsiPane) return;
     
-    // 너비 확정 대기
-    if (candlePane.clientWidth === 0) {
+    // 너비 확정 대기 (최소 200px 이상 너비 확보될 때까지 대기하여 찌그러짐 방지)
+    if (candlePane.clientWidth < 200) {
         setTimeout(() => renderChartsActual(chartData, stockName, code), 50);
         return;
     }
