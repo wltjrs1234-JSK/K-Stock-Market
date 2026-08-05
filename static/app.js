@@ -901,6 +901,17 @@ async function updateWatchlistData() {
         bindAvgPriceEditor();
         bindQuantityEditor();
 
+        // 6. 선택된 종목이 없거나 최초 접속 시 첫 번째 종목 차트 자동 렌더링
+        if (!selectedStockCode && activeAcc && activeAcc.watchlist && activeAcc.watchlist.length > 0) {
+            selectedStockCode = activeAcc.watchlist[0].code;
+            // 첫 번 행 active 클래스 부여
+            const firstRow = document.querySelector(`#watchlist-tbody tr[data-code="${selectedStockCode}"]`);
+            if (firstRow) firstRow.classList.add('active-row');
+        }
+        if (selectedStockCode && !candleChart) {
+            updateStockChart(selectedStockCode);
+        }
+
     } catch (e) {
         console.error("관심종목 갱신 오류:", e);
     }
@@ -1998,16 +2009,16 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
 }
 
 // 실제 ApexCharts 렌더링 실행
-async function renderChartsActual(chartData, stockName, code) {
+async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
     const candlePane = document.getElementById('chart-pane-candle');
     const volumePane = document.getElementById('chart-pane-volume');
     const rsiPane = document.getElementById('chart-pane-rsi');
     
     if (!candlePane || !volumePane || !rsiPane) return;
     
-    // 너비 확정 대기 (최소 200px 이상 너비 확보될 때까지 대기하여 찌그러짐 방지)
-    if (candlePane.clientWidth < 200) {
-        setTimeout(() => renderChartsActual(chartData, stockName, code), 50);
+    // 너비 확정 대기 (최대 5회 재시도 후 부모 영역 기준으로 강제 렌더링)
+    if (candlePane.clientWidth < 200 && retryCount < 5) {
+        setTimeout(() => renderChartsActual(chartData, stockName, code, retryCount + 1), 50);
         return;
     }
     
@@ -2550,4 +2561,17 @@ function reorderWatchlistFromDOM() {
         saveWatchlistToServer();
     }
 }
+
+// 창 크기 변경 시 차트 부드러운 자동 리사이즈 동기화
+window.addEventListener('resize', () => {
+    if (candleChart && typeof candleChart.windowResize === 'function') {
+        candleChart.windowResize();
+    }
+    if (volumeChart && typeof volumeChart.windowResize === 'function') {
+        volumeChart.windowResize();
+    }
+    if (rsiChart && typeof rsiChart.windowResize === 'function') {
+        rsiChart.windowResize();
+    }
+});
 
