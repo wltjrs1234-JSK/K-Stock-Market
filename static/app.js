@@ -26,17 +26,25 @@ let cachedStockData = {}; // 마지막으로 조회된 주가 캐시 (평단가/
 
 // 해외 주식 판별 헬퍼 함수
 function isUsStock(code) {
-    const VALID_INDICES = ["KOSPI", "KOSDAQ", "USDKRW", "NASDAQ", "OIL_CL", "CMDT_GC"];
+    const VALID_INDICES = ["KOSPI", "KOSDAQ", "USDKRW", "NASDAQ", "OIL_CL", "CMDT_GC", "US10Y", "US30Y", "VIX", "FEAR_GREED"];
     if (VALID_INDICES.includes(code)) return false;
     return code.length !== 6 || !/^\d/.test(code);
 }
 
-// ApexCharts 인스턴스 관리용 글로벌 객체
+// ApexCharts 인스턴스 및 차트 상태 관리용 글로벌 객체
 let candleChart = null;
 let volumeChart = null;
 let rsiChart = null;
 let portfolioPieChart = null; // 자산 비중 파이 차트 인스턴스
 let pieChartView = 'category'; // 'category' (4대 섹션) 또는 'stock' (종목별)
+
+let currentChartData = []; // 현재 차트에 렌더링된 캔들 데이터 (배열)
+let currentChartCode = ''; // 현재 렌더링된 종목 코드
+let currentStockInfo = null; // 현재 종목 시세 정보
+let chartVisibleRange = { startIndex: 0, endIndex: 0 }; // 현재 보이는 뷰포트 인덱스 범위
+let isChartLoading = false; // 차트 API 요청 진행 중 플래그 (중복 호출 차단)
+let chartDataCache = {}; // 종목별 차트 데이터 클라이언트 캐시 { [code]: { data, stockInfo, timestamp } }
+let showIndicators = true; // 보조지표 표시 여부
 
 let isDraggingWatchlist = false; // 관심종목 드래그 정렬 시 폴링 일시중단용 플래그
 let latestRequestedChartCode = ''; // 가장 최근 요청된 차트 종목 코드 (Race Condition 방지용)
@@ -292,6 +300,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         updateStockChart(selectedStockCode);
     }
     
+    // 차트 마우스 휠 줌 / 드래그 / 기간 프리셋 이벤트 바인딩
+    initChartInteractions();
+
     // 스플리터 레이아웃 바인딩
     initSplitterLayout();
 
@@ -526,8 +537,10 @@ function bindIndexTriggerCards() {
 
             selectedStockCode = code;
             
-            // 관심종목 테이블 행 선택 해제
+            // 관심종목 테이블 행 및 다른 지표 카드 선택 해제 후 현재 카드 활성화
             document.querySelectorAll('#watchlist-tbody tr').forEach(r => r.classList.remove('active-row'));
+            document.querySelectorAll('.index-trigger-card').forEach(c => c.classList.remove('active-card'));
+            card.classList.add('active-card');
 
             // 1순위: 차트 갱신을 먼저 즉각 시작!
             updateStockChart(code);
@@ -590,7 +603,7 @@ function toggleStealthMode() {
 // [4. 데이터 연동 (API Fetch)]
 // ==========================================================================
 
-// 4.1 종합 마켓 지표 업데이트 (코스피, 코스닥, 환율, 금)
+// 4.1 종합 마켓 지표 업데이트 (코스피, 코스닥, 환율, 나스닥, 유가, 금, 국채금리, VIX, 공포탐욕)
 async function updateMarketSummary() {
     try {
         const res = await fetch('/api/market-summary');
@@ -602,13 +615,19 @@ async function updateMarketSummary() {
             usdKrwRate = parseFloat(data.exchange.price.replace(/,/g, '')) || 1350.0;
         }
 
-        // UI 갱신 (지표 카드)
+        // UI 갱신 (지표 카드 12종)
         renderIndexCard('kospi', data.kospi);
         renderIndexCard('kosdaq', data.kosdaq);
         renderIndexCard('exchange', data.exchange);
         renderIndexCard('nasdaq', data.nasdaq);
+        renderIndexCard('sp500', data.sp500);
+        renderIndexCard('dji', data.dji);
         renderIndexCard('wti', data.wti);
         renderIndexCard('gold', data.gold_dollar);
+        renderIndexCard('us10y', data.us10y, '%');
+        renderIndexCard('us30y', data.us30y, '%');
+        renderIndexCard('vix', data.vix, 'pt');
+        renderFearGreedCard(data.fear_greed);
 
         // 스텔스 모드 내 변수 값 동기화 (상사에게 보이지 않는 깨알 위장)
         updateStealthIndex('kospi', data.kospi);
@@ -626,7 +645,7 @@ async function updateMarketSummary() {
 }
 
 // 지표 카드 한 장 렌더링
-function renderIndexCard(idPrefix, itemData) {
+function renderIndexCard(idPrefix, itemData, unitSuffix = '') {
     if (!itemData) return;
     
     const priceEl = document.getElementById(`val-${idPrefix}-price`);
@@ -636,18 +655,68 @@ function renderIndexCard(idPrefix, itemData) {
 
     if (!priceEl || !changeEl || !rateEl) return;
 
-    priceEl.innerText = itemData.price;
-    changeEl.innerText = (itemData.status === 'UP' ? '▲ ' : itemData.status === 'DOWN' ? '▼ ' : '') + itemData.change;
-    rateEl.innerText = `${itemData.status === 'UP' ? '+' : ''}${itemData.rate}%`;
+    const hasValidPrice = itemData.price && itemData.price !== '-';
+    if (hasValidPrice) {
+        priceEl.innerText = unitSuffix && !itemData.price.includes(unitSuffix) ? `${itemData.price}${unitSuffix}` : itemData.price;
+        changeEl.innerText = (itemData.status === 'UP' ? '▲ ' : itemData.status === 'DOWN' ? '▼ ' : '') + itemData.change;
+        rateEl.innerText = `${itemData.status === 'UP' ? '+' : ''}${itemData.rate}%`;
+    } else {
+        priceEl.innerText = '-';
+        changeEl.innerText = '-';
+        rateEl.innerText = '-';
+    }
 
     // 변동 상태 스타일
-    cardEl.className = 'summary-card';
+    const isSelected = selectedStockCode === (cardEl ? cardEl.getAttribute('data-code') : '');
+    cardEl.className = 'summary-card index-trigger-card' + (isSelected ? ' active-card' : '');
     if (itemData.status === 'UP') {
         cardEl.classList.add('text-up');
     } else if (itemData.status === 'DOWN') {
         cardEl.classList.add('text-down');
     } else {
         cardEl.classList.add('text-same');
+    }
+}
+
+// CNN 공포&탐욕 전용 카드 렌더링
+function renderFearGreedCard(fg) {
+    if (!fg) return;
+    const priceEl = document.getElementById('val-feargreed-price');
+    const ratingEl = document.getElementById('val-feargreed-rating');
+    const changeEl = document.getElementById('val-feargreed-change');
+    const cardEl = document.getElementById('card-feargreed');
+    const moodIcon = document.getElementById('icon-fg-mood');
+    
+    const hasValidPrice = fg.price && fg.price !== '-';
+    if (priceEl) priceEl.innerText = hasValidPrice ? `${fg.price}점` : '-';
+    if (ratingEl) {
+        ratingEl.innerText = fg.rating_kor || '중립';
+        ratingEl.className = 'index-change ' + `fg-${fg.rating || 'neutral'}`;
+    }
+    if (changeEl) {
+        changeEl.innerText = hasValidPrice ? `${fg.status === 'UP' ? '▲ ' : fg.status === 'DOWN' ? '▼ ' : ''}${fg.change}` : '-';
+        changeEl.className = 'index-rate ' + (fg.status === 'UP' ? 'text-up' : fg.status === 'DOWN' ? 'text-down' : 'text-same');
+    }
+    
+    // 무드 아이콘 동적 변경
+    if (moodIcon) {
+        const r = (fg.rating || 'neutral').toLowerCase();
+        if (r.includes('extreme fear')) {
+            moodIcon.className = 'fa-solid fa-face-dizzy index-icon fg-extreme-fear';
+        } else if (r.includes('fear')) {
+            moodIcon.className = 'fa-solid fa-face-frown index-icon fg-fear';
+        } else if (r.includes('extreme greed')) {
+            moodIcon.className = 'fa-solid fa-face-grin-stars index-icon fg-extreme-greed';
+        } else if (r.includes('greed')) {
+            moodIcon.className = 'fa-solid fa-face-smile-beam index-icon fg-greed';
+        } else {
+            moodIcon.className = 'fa-solid fa-face-meh index-icon fg-neutral';
+        }
+    }
+
+    const isSelected = selectedStockCode === 'FEAR_GREED';
+    if (cardEl) {
+        cardEl.className = 'summary-card index-trigger-card card-fear-greed' + (isSelected ? ' active-card' : '');
     }
 }
 
@@ -675,6 +744,35 @@ function formatQuantity(qty) {
         minimumFractionDigits: 0, 
         maximumFractionDigits: 4 
     });
+}
+
+// RSI(14) 상태별 뱃지 및 수치 렌더링 헬퍼
+function renderRsiBadge(rsi) {
+    if (rsi === undefined || rsi === null || isNaN(rsi)) {
+        return '<span class="rsi-value-text rsi-neutral">-</span>';
+    }
+    const val = parseFloat(rsi);
+    if (val >= 70) {
+        return `
+            <div class="rsi-badge-wrap rsi-overbought" title="RSI ${val.toFixed(1)}: 과매수 구간 (매도 고려)">
+                <span class="rsi-num font-outfit">${val.toFixed(1)}</span>
+                <span class="rsi-pill pill-overbought">과매수</span>
+            </div>
+        `;
+    } else if (val <= 30) {
+        return `
+            <div class="rsi-badge-wrap rsi-oversold" title="RSI ${val.toFixed(1)}: 과매도 구간 (매수 고려)">
+                <span class="rsi-num font-outfit">${val.toFixed(1)}</span>
+                <span class="rsi-pill pill-oversold">과매도</span>
+            </div>
+        `;
+    } else {
+        return `
+            <div class="rsi-badge-wrap rsi-normal" title="RSI ${val.toFixed(1)}: 중립 구간">
+                <span class="rsi-num font-outfit">${val.toFixed(1)}</span>
+            </div>
+        `;
+    }
 }
 
 // 4.2 관심종목 데이터 업데이트
@@ -712,7 +810,7 @@ async function updateWatchlistData() {
         let selectedStock = results.find(s => s && s.code === selectedStockCode);
         if (selectedStock) {
             renderStockDetails(selectedStock);
-        } else if (['KOSPI', 'KOSDAQ', 'NASDAQ', 'USDKRW', 'OIL_CL', 'CMDT_GC'].includes(selectedStockCode)) {
+        } else if (['KOSPI', 'KOSDAQ', 'NASDAQ', 'USDKRW', 'OIL_CL', 'CMDT_GC', 'US10Y', 'US30Y', 'VIX', 'FEAR_GREED'].includes(selectedStockCode)) {
             fetch(`/api/stock/${selectedStockCode}`)
                 .then(r => r.json())
                 .then(stockData => {
@@ -824,7 +922,8 @@ async function updateWatchlistData() {
                     ${displayEvalPrice}
                 </td>
                 <td class="profit-rate-cell ${profitClass}">${profitRateText}</td>
-                <td class="text-same">${stock.volume.toLocaleString()}</td>
+                <td class="rsi-cell">${renderRsiBadge(stock.rsi)}</td>
+                <td class="text-same font-outfit">${stock.volume.toLocaleString()}</td>
                 <td>
                     <button class="btn-delete" data-code="${stock.code}">
                         <i class="fa-regular fa-trash-can"></i>
@@ -908,7 +1007,7 @@ async function updateWatchlistData() {
             const firstRow = document.querySelector(`#watchlist-tbody tr[data-code="${selectedStockCode}"]`);
             if (firstRow) firstRow.classList.add('active-row');
         }
-        if (selectedStockCode && !candleChart) {
+        if (selectedStockCode && !candleChart && !isChartLoading) {
             updateStockChart(selectedStockCode);
         }
 
@@ -1526,8 +1625,29 @@ function renderStockDetails(stock) {
     let displayOpen = stock.open;
     let displayHigh = stock.high;
     let displayLow = stock.low;
+    let displayChange = stock.change;
+    let displayVolume = (stock.volume !== undefined && stock.volume !== null && stock.volume > 0) ? stock.volume.toLocaleString() : '-';
 
-    if (isUs) {
+    // 매크로 지표별 특수 포맷팅
+    if (stock.code === 'US10Y' || stock.code === 'US30Y') {
+        displayPrice = `${stock.price}%`;
+        displayOpen = `${stock.open}%`;
+        displayHigh = `${stock.high}%`;
+        displayLow = `${stock.low}%`;
+        displayChange = `${stock.change}%p`;
+    } else if (stock.code === 'VIX') {
+        displayPrice = `${stock.price} pt`;
+        displayOpen = `${stock.open} pt`;
+        displayHigh = `${stock.high} pt`;
+        displayLow = `${stock.low} pt`;
+        displayChange = `${stock.change} pt`;
+    } else if (stock.code === 'FEAR_GREED') {
+        displayPrice = `${stock.price}점 (${stock.rating_kor || '중립'})`;
+        displayOpen = `${stock.open}점`;
+        displayHigh = `${stock.high}점`;
+        displayLow = `${stock.low}점`;
+        displayChange = `${stock.change}점`;
+    } else if (isUs) {
         const currentPriceNum = parseFloat(String(stock.price || 0).replace(/,/g, '')) || 0;
         const openNum = parseFloat(String(stock.open || 0).replace(/,/g, '')) || 0;
         const highNum = parseFloat(String(stock.high || 0).replace(/,/g, '')) || 0;
@@ -1537,6 +1657,9 @@ function renderStockDetails(stock) {
         displayOpen = `₩${Math.round(openNum * usdKrwRate).toLocaleString()}`;
         displayHigh = `₩${Math.round(highNum * usdKrwRate).toLocaleString()}`;
         displayLow = `₩${Math.round(lowNum * usdKrwRate).toLocaleString()}`;
+        
+        const changeNum = parseFloat(String(stock.change || 0).replace(/,/g, ''));
+        displayChange = `₩${Math.round(changeNum * usdKrwRate).toLocaleString()}`;
     }
 
     priceEl.className = 'value ' + statusClass;
@@ -1546,7 +1669,7 @@ function renderStockDetails(stock) {
     rateEl.innerText = `${stock.status === 'UP' ? '+' : ''}${stock.rate}%`;
     
     document.getElementById('detail-open').innerText = displayOpen;
-    document.getElementById('detail-volume').innerText = stock.volume.toLocaleString();
+    document.getElementById('detail-volume').innerText = displayVolume;
     document.getElementById('detail-high').innerText = displayHigh;
     document.getElementById('detail-low').innerText = displayLow;
 
@@ -1568,11 +1691,6 @@ function renderStockDetails(stock) {
         mtsArrow.className = 'mts-change-arrow ' + statusClass;
     }
     if (mtsChange) {
-        let displayChange = stock.change;
-        if (isUs) {
-            const changeNum = parseFloat(stock.change.replace(/,/g, ''));
-            displayChange = `₩${Math.round(changeNum * usdKrwRate).toLocaleString()}`;
-        }
         mtsChange.innerText = displayChange;
         mtsChange.className = 'mts-change-price ' + statusClass;
     }
@@ -1699,7 +1817,7 @@ function initSplitterLayout() {
 }
 
 // ==========================================================================
-// [5. 실시간 차트 업데이트 및 렌더러 (ApexCharts)]
+// [5. 실시간 차트 업데이트 및 렌더러 (ApexCharts + 휠 줌 & 드래그 엔진)]
 // ==========================================================================
 async function updateStockChart(code) {
     if (!code) {
@@ -1709,45 +1827,76 @@ async function updateStockChart(code) {
     
     // ApexCharts 로딩 대기
     if (typeof ApexCharts === 'undefined') {
-        console.warn("ApexCharts is not loaded yet. Retrying in 300ms...");
-        setTimeout(() => updateStockChart(code), 300);
+        console.warn("ApexCharts is not loaded yet. Retrying in 200ms...");
+        setTimeout(() => updateStockChart(code), 200);
         return;
     }
     
-    // 비동기 경합 조건 해결용 전역 요청 변수 업데이트
     latestRequestedChartCode = code;
     
     const placeholder = document.getElementById('chart-placeholder');
     const panesWrapper = document.getElementById('chart-panes-wrapper');
     const titleEl = document.getElementById('chart-stock-title');
-    
-    // 로딩 인디케이터 표시
-    if (placeholder) {
+
+    // 1. 클라이언트 메모리 캐시 체크 (60초 유효) -> 0ms 즉시 로드
+    const cached = chartDataCache[code];
+    const now = Date.now();
+    if (cached && (now - cached.timestamp < 60000) && cached.data && cached.data.length > 0) {
+        const stockName = cached.stockInfo ? cached.stockInfo.name : code;
+        if (titleEl) {
+            titleEl.innerText = `${stockName} (${code}) 일봉 차트`;
+        }
+        if (cached.stockInfo) {
+            renderStockDetails(cached.stockInfo);
+        }
+        if (placeholder) placeholder.classList.add('hidden');
+        if (panesWrapper) panesWrapper.classList.remove('hidden');
+
+        renderChartsActual(cached.data, stockName, code, 0, cached.stockInfo);
+        return;
+    }
+
+    if (isChartLoading && latestRequestedChartCode === code) return;
+    isChartLoading = true;
+
+    // 로딩 인디케이터 표시 (차트가 없는 경우에만 placeholder 활성화)
+    if (!candleChart && placeholder) {
         placeholder.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right: 6px;"></i> 차트 데이터를 불러오는 중입니다...';
         placeholder.classList.remove('hidden');
+        if (panesWrapper) panesWrapper.classList.add('hidden');
     }
-    if (panesWrapper) panesWrapper.classList.add('hidden');
     
     try {
+        // 단 1회 차트 & 시세 통합 API 호출
         const res = await fetch(`/api/stock/${code}/chart`);
         if (!res.ok) throw new Error("Chart data fetch failed");
         
-        // 1차 Race condition 체크
+        // Race condition 체크: 사용자가 그 사이 다른 종목을 눌렀으면 무시
         if (latestRequestedChartCode !== code) {
-            console.log(`[Race Condition Shield] Discarded chart response for ${code} as latest requested is ${latestRequestedChartCode}`);
+            console.log(`[Race Shield] Discarded chart response for ${code}`);
             return;
         }
         
-        const chartData = await res.json();
+        const rawRes = await res.json();
+        let chartData = Array.isArray(rawRes) ? rawRes : (rawRes.candles || []);
+        let stockInfo = Array.isArray(rawRes) ? null : (rawRes.stock_info || null);
         
         if (!chartData || chartData.length === 0) {
             if (latestRequestedChartCode === code) {
                 clearStockCharts();
+                if (placeholder) {
+                    placeholder.innerHTML = '차트 데이터가 존재하지 않습니다.';
+                    placeholder.classList.remove('hidden');
+                }
             }
             return;
         }
+
+        if (stockInfo) {
+            renderStockDetails(stockInfo);
+        }
         
-        // 해외 주식이면 차트의 달러 수치 데이터를 전역 실시간 환율(usdKrwRate)을 곱해 원화(KRW)로 환산
+        // 해외 주식이면 차트의 달러 수치 데이터를 전역 환율(usdKrwRate)을 곱해 원화(KRW)로 환산
         let processedChartData = chartData;
         if (isUsStock(code)) {
             processedChartData = chartData.map(item => ({
@@ -1766,17 +1915,15 @@ async function updateStockChart(code) {
                 macd_hist: item.macd_hist !== null && item.macd_hist !== undefined ? item.macd_hist * usdKrwRate : null
             }));
         }
+
+        // 캐시 저장
+        chartDataCache[code] = {
+            data: processedChartData,
+            stockInfo: stockInfo,
+            timestamp: Date.now()
+        };
         
-        // 종목명 매핑
-        const stockRes = await fetch(`/api/stock/${code}`).catch(() => null);
-        
-        // 2차 Race condition 체크
-        if (latestRequestedChartCode !== code) {
-            console.log(`[Race Condition Shield] Discarded name response for ${code}`);
-            return;
-        }
-        
-        const stockName = stockRes && stockRes.ok ? (await stockRes.json()).name : code;
+        const stockName = stockInfo ? stockInfo.name : code;
         if (titleEl) {
             titleEl.innerText = `${stockName} (${code}) 일봉 차트`;
         }
@@ -1785,27 +1932,25 @@ async function updateStockChart(code) {
         if (placeholder) placeholder.classList.add('hidden');
         if (panesWrapper) panesWrapper.classList.remove('hidden');
         
-        // 브라우저 Reflow 대응 지연 호출
-        setTimeout(() => {
-            // 최종 렌더링 전 다시 한 번 검증
-            if (latestRequestedChartCode === code) {
-                renderChartsActual(processedChartData, stockName, code);
-            }
-        }, 50);
+        // 차트 실제 렌더링
+        if (latestRequestedChartCode === code) {
+            renderChartsActual(processedChartData, stockName, code, 0, stockInfo);
+        }
         
     } catch (err) {
         console.error("Chart load error:", err);
-        // 최종 요청 코드와 일치할 때만 클리어 처리
         if (latestRequestedChartCode === code) {
             clearStockCharts();
             if (placeholder) {
                 placeholder.innerHTML = '차트 데이터를 불러오는 데 실패했습니다. 다시 시도해 주세요.';
+                placeholder.classList.remove('hidden');
             }
         }
+    } finally {
+        isChartLoading = false;
     }
 }
 
-// 실제 ApexCharts 렌더링 실행
 // 헬퍼 함수: MTS용 동적 어노테이션 생성
 function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, currentStock) {
     const annotations = {
@@ -1814,7 +1959,17 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
         points: []
     };
 
+    if (!uniqueChartData || uniqueChartData.length === 0) return annotations;
+
+    const code = currentStock ? currentStock.code : '';
     const isUs = currentStock ? isUsStock(currentStock.code) : false;
+
+    const formatVal = (v) => {
+        if (code === 'US10Y' || code === 'US30Y') return `${Number(v).toFixed(3)}%`;
+        if (code === 'VIX') return `${Number(v).toFixed(2)} pt`;
+        if (code === 'FEAR_GREED') return `${Number(v).toFixed(1)}점`;
+        return `${Math.round(v).toLocaleString()}원`;
+    };
 
     // 1. 내 평단가 기준선 (존재하는 경우)
     if (avgPrice > 0) {
@@ -1846,7 +2001,13 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
         const statusColor = currentStock.status === 'UP' ? '#ef4444' : currentStock.status === 'DOWN' ? '#3b82f6' : '#94a3b8';
         
         let displayText = `${rawPriceStr} (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
-        if (isUs) {
+        if (code === 'US10Y' || code === 'US30Y') {
+            displayText = `${rawPriceStr}% (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
+        } else if (code === 'VIX') {
+            displayText = `${rawPriceStr} pt (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
+        } else if (code === 'FEAR_GREED') {
+            displayText = `${rawPriceStr}점 (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
+        } else if (isUs) {
             displayText = `₩${Math.round(currentPriceNum).toLocaleString()} (${currentStock.status === 'UP' ? '+' : ''}${currentStock.rate}%)`;
         }
 
@@ -1870,7 +2031,7 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
 
     // 3. 뷰포트 내 최고가 / 최저가 실시간 포인터 추적
     if (uniqueChartData.length > 0 && startIndex < uniqueChartData.length) {
-        const viewportData = uniqueChartData.slice(startIndex, endIndex + 1);
+        const viewportData = uniqueChartData.slice(startIndex, Math.min(uniqueChartData.length, endIndex + 1));
         if (viewportData.length > 0) {
             let highest = viewportData[0];
             let lowest = viewportData[0];
@@ -1881,8 +2042,8 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
             });
             
             const baseClose = viewportData[0].close;
-            const highestRate = (((highest.high - baseClose) / baseClose) * 100).toFixed(2);
-            const lowestRate = (((lowest.low - baseClose) / baseClose) * 100).toFixed(2);
+            const highestRate = baseClose > 0 ? (((highest.high - baseClose) / baseClose) * 100).toFixed(2) : '0.00';
+            const lowestRate = baseClose > 0 ? (((lowest.low - baseClose) / baseClose) * 100).toFixed(2) : '0.00';
             
             const highestDateFormatted = highest.time.substring(2).replace(/-/g, '.');
             const lowestDateFormatted = lowest.time.substring(2).replace(/-/g, '.');
@@ -1905,7 +2066,7 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
                         fontSize: '9px',
                         fontWeight: '700'
                     },
-                    text: `▲ ${Math.round(highest.high).toLocaleString()}원 (${highestDateFormatted}) +${highestRate}%`,
+                    text: `▲ ${formatVal(highest.high)} (${highestDateFormatted}) +${highestRate}%`,
                     offsetY: -15
                 }
             });
@@ -1928,7 +2089,7 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
                         fontSize: '9px',
                         fontWeight: '700'
                     },
-                    text: `▼ ${Math.round(lowest.low).toLocaleString()}원 (${lowestDateFormatted}) ${lowestRate}%`,
+                    text: `▼ ${formatVal(lowest.low)} (${lowestDateFormatted}) ${lowestRate}%`,
                     offsetY: 15
                 }
             });
@@ -1941,7 +2102,7 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
     let inWeak = false;
     let weakStart = null;
 
-    uniqueChartData.forEach((item, idx) => {
+    uniqueChartData.forEach((item) => {
         const t = new Date(item.time).getTime();
         const rsiVal = item.rsi;
 
@@ -2009,24 +2170,24 @@ function getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, curr
 }
 
 // 실제 ApexCharts 렌더링 실행
-async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
+async function renderChartsActual(chartData, stockName, code, retryCount = 0, stockInfo = null) {
     const candlePane = document.getElementById('chart-pane-candle');
     const volumePane = document.getElementById('chart-pane-volume');
     const rsiPane = document.getElementById('chart-pane-rsi');
     
     if (!candlePane || !volumePane || !rsiPane) return;
     
-    // 너비 확정 대기 (최대 5회 재시도 후 부모 영역 기준으로 강제 렌더링)
+    // 너비 확정 대기
     if (candlePane.clientWidth < 200 && retryCount < 5) {
-        setTimeout(() => renderChartsActual(chartData, stockName, code, retryCount + 1), 50);
+        setTimeout(() => renderChartsActual(chartData, stockName, code, retryCount + 1, stockInfo), 50);
         return;
     }
     
     try {
-        // 기존 인스턴스 깔끔히 제거
-        if (candleChart) { candleChart.destroy(); candleChart = null; }
-        if (volumeChart) { volumeChart.destroy(); volumeChart = null; }
-        if (rsiChart) { rsiChart.destroy(); rsiChart = null; }
+        // 기존 차트 인스턴스 안전 파괴
+        if (candleChart) { try { candleChart.destroy(); } catch(e){} candleChart = null; }
+        if (volumeChart) { try { volumeChart.destroy(); } catch(e){} volumeChart = null; }
+        if (rsiChart) { try { rsiChart.destroy(); } catch(e){} rsiChart = null; }
         
         // 중복 제거 및 시간순 정렬
         const seenTimes = new Set();
@@ -2039,23 +2200,27 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
         });
         uniqueChartData.sort((a, b) => new Date(a.time) - new Date(b.time));
         
+        // 전역 상태에 현재 차트 데이터 바인딩
+        currentChartData = uniqueChartData;
+        currentChartCode = code;
+        currentStockInfo = stockInfo || cachedStockData[code] || null;
+
         const len = uniqueChartData.length;
-        const defaultWindowSize = 60;
+        const defaultWindowSize = Math.min(len, 60);
         const startIndex = Math.max(0, len - defaultWindowSize);
+        const endIndex = len - 1;
+        chartVisibleRange = { startIndex, endIndex };
         
         const minTime = len > 0 ? new Date(uniqueChartData[startIndex].time).getTime() : null;
-        const maxTime = len > 0 ? new Date(uniqueChartData[len - 1].time).getTime() : null;
+        const maxTime = len > 0 ? new Date(uniqueChartData[endIndex].time).getTime() : null;
 
-        // 최신 종목 정보 조회 (현재가 및 등락률 축 어노테이션용)
-        const currentStock = await fetch(`/api/stock/${code}`).then(r => r.json()).catch(() => null);
-        
         // 현재 활성화된 계좌 내에서 해당 종목의 평단가 조회
         const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
         const watchItem = activeAcc ? activeAcc.watchlist.find(w => w.code === code) : null;
         const avgPrice = watchItem ? watchItem.avgPrice : 0;
 
         // MTS용 동적 어노테이션 로드
-        const candleAnnotations = getMtsAnnotations(startIndex, len - 1, uniqueChartData, avgPrice, currentStock);
+        const candleAnnotations = getMtsAnnotations(startIndex, endIndex, uniqueChartData, avgPrice, currentStockInfo);
         
         const candleData = [];
         const sma5Data = [];
@@ -2077,24 +2242,14 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
             });
             
             // 2. 이동평균선
-            if (item.sma5 !== null && item.sma5 !== undefined) {
-                sma5Data.push({ x: timestamp, y: item.sma5 });
-            }
-            if (item.sma10 !== null && item.sma10 !== undefined) {
-                sma10Data.push({ x: timestamp, y: item.sma10 });
-            }
-            if (item.sma20 !== null && item.sma20 !== undefined) {
-                sma20Data.push({ x: timestamp, y: item.sma20 });
-            }
-            if (item.sma60 !== null && item.sma60 !== undefined) {
-                sma60Data.push({ x: timestamp, y: item.sma60 });
-            }
-            if (item.sma120 !== null && item.sma120 !== undefined) {
-                sma120Data.push({ x: timestamp, y: item.sma120 });
-            }
+            if (item.sma5 !== null && item.sma5 !== undefined) sma5Data.push({ x: timestamp, y: item.sma5 });
+            if (item.sma10 !== null && item.sma10 !== undefined) sma10Data.push({ x: timestamp, y: item.sma10 });
+            if (item.sma20 !== null && item.sma20 !== undefined) sma20Data.push({ x: timestamp, y: item.sma20 });
+            if (item.sma60 !== null && item.sma60 !== undefined) sma60Data.push({ x: timestamp, y: item.sma60 });
+            if (item.sma120 !== null && item.sma120 !== undefined) sma120Data.push({ x: timestamp, y: item.sma120 });
             
-            // 3. 거래량 (상승 빨강, 하락 파랑 개별 색상 바인딩)
-            const vColor = item.close >= item.open ? 'rgba(239, 68, 68, 0.6)' : 'rgba(59, 130, 246, 0.6)';
+            // 3. 거래량
+            const vColor = item.close >= item.open ? 'rgba(239, 68, 68, 0.65)' : 'rgba(59, 130, 246, 0.65)';
             volumeData.push({
                 x: timestamp,
                 y: item.volume,
@@ -2102,12 +2257,8 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
             });
             
             // 4. RSI 및 RSI Signal
-            if (item.rsi !== null && item.rsi !== undefined) {
-                rsiData.push({ x: timestamp, y: item.rsi });
-            }
-            if (item.rsi_signal !== null && item.rsi_signal !== undefined) {
-                rsiSignalData.push({ x: timestamp, y: item.rsi_signal });
-            }
+            if (item.rsi !== null && item.rsi !== undefined) rsiData.push({ x: timestamp, y: item.rsi });
+            if (item.rsi_signal !== null && item.rsi_signal !== undefined) rsiSignalData.push({ x: timestamp, y: item.rsi_signal });
         });
         
         // 공통 테마 설정
@@ -2125,9 +2276,7 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
                 animations: { enabled: false },
                 foreColor: darkThemeColor
             },
-            dataLabels: {
-                enabled: false
-            },
+            dataLabels: { enabled: false },
             series: [
                 { name: '일봉', type: 'candlestick', data: candleData },
                 { name: '5일선', type: 'line', data: sma5Data },
@@ -2160,13 +2309,17 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
             },
             yaxis: {
                 labels: {
-                    formatter: (v) => v ? Math.round(v).toLocaleString() : ''
+                    formatter: (v) => {
+                        if (v === undefined || v === null) return '';
+                        if (code === 'US10Y' || code === 'US30Y') return Number(v).toFixed(3) + '%';
+                        if (code === 'VIX') return Number(v).toFixed(2) + ' pt';
+                        if (code === 'FEAR_GREED') return Number(v).toFixed(1) + '점';
+                        return Math.round(v).toLocaleString();
+                    }
                 }
             },
             annotations: candleAnnotations,
-            grid: {
-                borderColor: gridColor
-            },
+            grid: { borderColor: gridColor },
             tooltip: {
                 theme: 'light',
                 shared: true,
@@ -2180,14 +2333,12 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
                 id: 'volume-chart',
                 group: 'stock-charts',
                 type: 'bar',
-                height: 180,
+                height: 170,
                 toolbar: { show: false },
                 animations: { enabled: false },
                 foreColor: darkThemeColor
             },
-            dataLabels: {
-                enabled: false
-            },
+            dataLabels: { enabled: false },
             series: [
                 { name: '거래량', data: volumeData }
             ],
@@ -2208,27 +2359,7 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
                     }
                 }
             },
-            annotations: {
-                yaxis: volumeData.length > 0 ? [{
-                    y: volumeData[volumeData.length - 1].y,
-                    borderColor: 'transparent',
-                    label: {
-                        borderColor: '#64748b',
-                        style: {
-                            color: '#ffffff',
-                            background: '#64748b',
-                            fontSize: '9px',
-                            fontWeight: 700
-                        },
-                        text: (volumeData[volumeData.length - 1].y >= 1000000)
-                            ? (volumeData[volumeData.length - 1].y / 1000000).toFixed(1) + 'M'
-                            : (volumeData[volumeData.length - 1].y / 1000).toFixed(0) + 'K'
-                    }
-                }] : []
-            },
-            grid: {
-                borderColor: gridColor
-            },
+            grid: { borderColor: gridColor },
             tooltip: {
                 theme: 'light',
                 x: { format: 'yyyy-MM-dd' }
@@ -2241,14 +2372,12 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
                 id: 'rsi-chart',
                 group: 'stock-charts',
                 type: 'line',
-                height: 180,
+                height: 170,
                 toolbar: { show: false },
                 animations: { enabled: false },
                 foreColor: darkThemeColor
             },
-            dataLabels: {
-                enabled: false
-            },
+            dataLabels: { enabled: false },
             series: [
                 { name: 'RSI(14)', data: rsiData },
                 { name: 'Signal(9)', data: rsiSignalData }
@@ -2303,9 +2432,7 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
                     }
                 ]
             },
-            grid: {
-                borderColor: gridColor
-            },
+            grid: { borderColor: gridColor },
             tooltip: {
                 theme: 'light',
                 x: { format: 'yyyy-MM-dd' }
@@ -2314,83 +2441,16 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
         
         // 차트 렌더링
         candleChart = new ApexCharts(candlePane, candleOptions);
-        candleChart.render();
+        await candleChart.render();
         
         volumeChart = new ApexCharts(volumePane, volumeOptions);
-        volumeChart.render();
+        await volumeChart.render();
         
         rsiChart = new ApexCharts(rsiPane, rsiOptions);
-        rsiChart.render();
+        await rsiChart.render();
         
-        // 4. 스크롤바 슬라이더 초기화 및 동적 연동
-        const slider = document.getElementById('chart-timeline-slider');
-        const minDateLabel = document.getElementById('scrollbar-min-date');
-        const maxDateLabel = document.getElementById('scrollbar-max-date');
-
-        if (slider && minDateLabel && maxDateLabel && len > 0) {
-            const maxSliderVal = Math.max(0, len - defaultWindowSize);
-            slider.min = 0;
-            slider.max = maxSliderVal;
-            slider.value = maxSliderVal; // 디폴트는 가장 최근 구간
-
-            // 초기 라벨 텍스트 지정 (최근 60일 구간)
-            minDateLabel.innerText = uniqueChartData[startIndex].time;
-            maxDateLabel.innerText = uniqueChartData[len - 1].time;
-
-            // 슬라이더 조절 시 줌 범위 및 최고/최저가 어노테이션 갱신
-            slider.oninput = () => {
-                const val = parseInt(slider.value);
-                const currentStartIndex = val;
-                const currentEndIndex = Math.min(len - 1, val + defaultWindowSize - 1);
-
-                const slideMin = new Date(uniqueChartData[currentStartIndex].time).getTime();
-                const slideMax = new Date(uniqueChartData[currentEndIndex].time).getTime();
-
-                // 날짜 라벨 실시간 갱신
-                minDateLabel.innerText = uniqueChartData[currentStartIndex].time;
-                maxDateLabel.innerText = uniqueChartData[currentEndIndex].time;
-
-                // 최고/최저가 및 현재가 어노테이션 실시간 계산
-                const updatedAnnotations = getMtsAnnotations(
-                    currentStartIndex,
-                    currentEndIndex,
-                    uniqueChartData,
-                    avgPrice,
-                    currentStock
-                );
-
-                // 캔들차트 줌인 및 어노테이션 동적 갱신
-                if (candleChart) {
-                    candleChart.updateOptions({
-                        xaxis: {
-                            min: slideMin,
-                            max: slideMax
-                        },
-                        annotations: updatedAnnotations
-                    }, false, false);
-                }
-
-                // 거래량차트 개별 줌 적용 (동기화 전파 시 Y축 눈금 및 가격 뱃지 겹침 방지)
-                if (volumeChart) {
-                    volumeChart.updateOptions({
-                        xaxis: {
-                            min: slideMin,
-                            max: slideMax
-                        }
-                    }, false, false);
-                }
-
-                // RSI차트 개별 줌 적용 (동기화 전파 시 Y축 눈금 및 가격 뱃지 겹침 방지)
-                if (rsiChart) {
-                    rsiChart.updateOptions({
-                        xaxis: {
-                            min: slideMin,
-                            max: slideMax
-                        }
-                    }, false, false);
-                }
-            };
-        }
+        // 뷰포트 상태 및 슬라이더 초기 동기화
+        updateChartViewWindow(startIndex, endIndex, true);
         
         // 스텔스 모드 동기화
         const lastItem = uniqueChartData[uniqueChartData.length - 1];
@@ -2399,17 +2459,288 @@ async function renderChartsActual(chartData, stockName, code, retryCount = 0) {
         }
         
     } catch (err) {
-        console.error("Chart load error:", err);
+        console.error("Chart render error:", err);
         clearStockCharts();
     }
 }
 
+// 뷰포트 시간 범위 및 어노테이션 / 슬라이더 / 툴바 일괄 동기화
+function updateChartViewWindow(startIndex, endIndex, updateSlider = true) {
+    if (!currentChartData || currentChartData.length === 0) return;
+    
+    const len = currentChartData.length;
+    startIndex = Math.max(0, Math.min(len - 1, startIndex));
+    endIndex = Math.max(startIndex, Math.min(len - 1, endIndex));
+    
+    chartVisibleRange = { startIndex, endIndex };
+
+    const slideMin = new Date(currentChartData[startIndex].time).getTime();
+    const slideMax = new Date(currentChartData[endIndex].time).getTime();
+
+    // 활성 계좌의 평단가
+    const activeAcc = watchlist.accounts ? watchlist.accounts.find(acc => acc.id === currentAccountId) : null;
+    const watchItem = activeAcc ? activeAcc.watchlist.find(w => w.code === currentChartCode) : null;
+    const avgPrice = watchItem ? watchItem.avgPrice : 0;
+
+    // 동적 어노테이션 재계산
+    const updatedAnnotations = getMtsAnnotations(
+        startIndex,
+        endIndex,
+        currentChartData,
+        avgPrice,
+        currentStockInfo
+    );
+
+    // 캔들차트 갱신
+    if (candleChart) {
+        candleChart.updateOptions({
+            xaxis: { min: slideMin, max: slideMax },
+            annotations: updatedAnnotations
+        }, false, false);
+    }
+
+    // 거래량 차트 갱신
+    if (volumeChart) {
+        volumeChart.updateOptions({
+            xaxis: { min: slideMin, max: slideMax }
+        }, false, false);
+    }
+
+    // RSI 차트 갱신
+    if (rsiChart) {
+        rsiChart.updateOptions({
+            xaxis: { min: slideMin, max: slideMax }
+        }, false, false);
+    }
+
+    // 하단 슬라이더 및 날짜 라벨 동기화
+    const slider = document.getElementById('chart-timeline-slider');
+    const minDateLabel = document.getElementById('scrollbar-min-date');
+    const maxDateLabel = document.getElementById('scrollbar-max-date');
+    const zoomTag = document.getElementById('chart-zoom-window-tag');
+
+    if (minDateLabel && currentChartData[startIndex]) {
+        minDateLabel.innerText = currentChartData[startIndex].time;
+    }
+    if (maxDateLabel && currentChartData[endIndex]) {
+        maxDateLabel.innerText = currentChartData[endIndex].time;
+    }
+    if (zoomTag) {
+        zoomTag.innerText = `${endIndex - startIndex + 1}봉`;
+    }
+
+    if (slider && updateSlider) {
+        const windowSize = endIndex - startIndex + 1;
+        const maxSliderVal = Math.max(0, len - windowSize);
+        slider.min = 0;
+        slider.max = maxSliderVal;
+        slider.value = startIndex;
+    }
+
+    // 기간 프리셋 버튼 active 상태 업데이트
+    const currentWindowSize = endIndex - startIndex + 1;
+    document.querySelectorAll('#chart-period-presets .mts-tool-btn').forEach(btn => {
+        const p = btn.getAttribute('data-period');
+        if (p === 'all' && currentWindowSize >= len) {
+            btn.classList.add('active');
+        } else if (p && Math.abs(parseInt(p) - currentWindowSize) <= 3 && endIndex === len - 1) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+}
+
+// 마우스 휠 Zoom In/Out, 드래그 패닝, 기간 선택 바인딩
+function initChartInteractions() {
+    const chartContainer = document.getElementById('stock-chart');
+    if (!chartContainer) return;
+
+    // 1. 마우스 휠 이벤트 (Zoom In / Zoom Out)
+    chartContainer.addEventListener('wheel', (e) => {
+        if (!currentChartData || currentChartData.length === 0) return;
+        if (!candleChart || !volumeChart || !rsiChart) return;
+        
+        e.preventDefault(); // 웹페이지 전체 스크롤 방지
+
+        const len = currentChartData.length;
+        const currentRange = chartVisibleRange;
+        const windowSize = currentRange.endIndex - currentRange.startIndex + 1;
+
+        // 휠 방향 판별 (위: 확대/봉 개수 축소, 아래: 축소/봉 개수 확대)
+        const zoomIn = e.deltaY < 0;
+        const step = Math.max(2, Math.round(windowSize * 0.15));
+
+        let newWindowSize;
+        if (zoomIn) {
+            newWindowSize = Math.max(10, windowSize - step * 2); // 최소 10봉
+        } else {
+            newWindowSize = Math.min(len, windowSize + step * 2); // 최대 전체 봉
+        }
+
+        if (newWindowSize === windowSize) return;
+
+        // 마우스 커서 위치 기준 줌 중심점 계산
+        const candlePane = document.getElementById('chart-pane-candle');
+        const rect = candlePane ? candlePane.getBoundingClientRect() : chartContainer.getBoundingClientRect();
+        const cursorX = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+        const anchorRatio = rect.width > 0 ? (cursorX / rect.width) : 0.85;
+
+        const diff = newWindowSize - windowSize;
+        let newStartIndex = Math.round(currentRange.startIndex - diff * (1 - anchorRatio));
+        let newEndIndex = newStartIndex + newWindowSize - 1;
+
+        if (newStartIndex < 0) {
+            newStartIndex = 0;
+            newEndIndex = Math.min(len - 1, newWindowSize - 1);
+        }
+        if (newEndIndex >= len) {
+            newEndIndex = len - 1;
+            newStartIndex = Math.max(0, len - newWindowSize);
+        }
+
+        updateChartViewWindow(newStartIndex, newEndIndex, true);
+    }, { passive: false });
+
+    // 2. 드래그 패닝(좌우 이동)
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartStartIdx = 0;
+    let dragStartEndIdx = 0;
+
+    chartContainer.addEventListener('mousedown', (e) => {
+        if (e.target.closest('#chart-scrollbar-area') || e.target.closest('.mts-chart-toolbar')) return;
+        if (e.button !== 0) return; // 좌클릭만
+        if (!currentChartData || currentChartData.length === 0) return;
+
+        isDragging = true;
+        dragStartX = e.clientX;
+        dragStartStartIdx = chartVisibleRange.startIndex;
+        dragStartEndIdx = chartVisibleRange.endIndex;
+        chartContainer.classList.add('panning');
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isDragging || !currentChartData || currentChartData.length === 0) return;
+        
+        const deltaX = e.clientX - dragStartX;
+        const candlePane = document.getElementById('chart-pane-candle');
+        const rect = candlePane ? candlePane.getBoundingClientRect() : chartContainer.getBoundingClientRect();
+        const windowSize = dragStartEndIdx - dragStartStartIdx + 1;
+        
+        if (rect.width <= 0) return;
+        
+        const indexShift = Math.round((deltaX / rect.width) * windowSize);
+        let newStartIndex = dragStartStartIdx - indexShift;
+        let newEndIndex = dragStartEndIdx - indexShift;
+
+        const len = currentChartData.length;
+        if (newStartIndex < 0) {
+            newStartIndex = 0;
+            newEndIndex = Math.min(len - 1, windowSize - 1);
+        }
+        if (newEndIndex >= len) {
+            newEndIndex = len - 1;
+            newStartIndex = Math.max(0, len - windowSize);
+        }
+
+        updateChartViewWindow(newStartIndex, newEndIndex, true);
+    });
+
+    window.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            chartContainer.classList.remove('panning');
+        }
+    });
+
+    // 3. 더블 클릭 시 기본 줌(60봉) 리셋
+    chartContainer.addEventListener('dblclick', (e) => {
+        if (e.target.closest('#chart-scrollbar-area') || e.target.closest('.mts-chart-toolbar')) return;
+        resetChartZoomToCount(60);
+    });
+
+    // 4. 슬라이더 드래그 실시간 동기화
+    const slider = document.getElementById('chart-timeline-slider');
+    if (slider) {
+        slider.oninput = () => {
+            if (!currentChartData || currentChartData.length === 0) return;
+            const val = parseInt(slider.value);
+            const windowSize = chartVisibleRange.endIndex - chartVisibleRange.startIndex + 1;
+            const newStartIndex = val;
+            const newEndIndex = Math.min(currentChartData.length - 1, val + windowSize - 1);
+            updateChartViewWindow(newStartIndex, newEndIndex, false);
+        };
+    }
+
+    // 5. 기간 프리셋 버튼 (1개월, 3개월, 6개월, 1년, 전체)
+    const presetContainer = document.getElementById('chart-period-presets');
+    if (presetContainer) {
+        presetContainer.addEventListener('click', (e) => {
+            const btn = e.target.closest('.mts-tool-btn');
+            if (!btn) return;
+            const period = btn.getAttribute('data-period');
+            if (!period) return;
+
+            resetChartZoomToCount(period);
+        });
+    }
+
+    // 6. 줌 리셋 버튼
+    const resetBtn = document.getElementById('btn-chart-zoom-reset');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            resetChartZoomToCount(60);
+        });
+    }
+
+    // 7. 보조지표 ON/OFF 토글
+    const indicatorToggle = document.getElementById('btn-toggle-indicators');
+    if (indicatorToggle) {
+        indicatorToggle.addEventListener('click', () => {
+            showIndicators = !showIndicators;
+            indicatorToggle.innerText = showIndicators ? 'ON' : 'OFF';
+            if (showIndicators) {
+                indicatorToggle.classList.remove('off');
+            } else {
+                indicatorToggle.classList.add('off');
+            }
+
+            const volPane = document.getElementById('chart-pane-volume');
+            const rsiPane = document.getElementById('chart-pane-rsi');
+            if (volPane) volPane.style.display = showIndicators ? 'block' : 'none';
+            if (rsiPane) rsiPane.style.display = showIndicators ? 'block' : 'none';
+        });
+    }
+}
+
+// 특정 봉 개수 또는 전체로 줌 셋업
+function resetChartZoomToCount(targetCount) {
+    if (!currentChartData || currentChartData.length === 0) return;
+    const len = currentChartData.length;
+    const count = targetCount === 'all' ? len : Math.min(len, parseInt(targetCount) || 60);
+    const newStartIndex = Math.max(0, len - count);
+    const newEndIndex = len - 1;
+    updateChartViewWindow(newStartIndex, newEndIndex, true);
+}
+
 // 차트 초기화 및 인스턴스 파괴
 function clearStockCharts() {
-    if (candleChart) { candleChart.destroy(); candleChart = null; }
-    if (volumeChart) { volumeChart.destroy(); volumeChart = null; }
-    if (rsiChart) { rsiChart.destroy(); rsiChart = null; }
+    if (candleChart) { try { candleChart.destroy(); } catch(e){} candleChart = null; }
+    if (volumeChart) { try { volumeChart.destroy(); } catch(e){} volumeChart = null; }
+    if (rsiChart) { try { rsiChart.destroy(); } catch(e){} rsiChart = null; }
     
+    currentChartData = [];
+    currentChartCode = '';
+    currentStockInfo = null;
+
+    const candlePane = document.getElementById('chart-pane-candle');
+    const volumePane = document.getElementById('chart-pane-volume');
+    const rsiPane = document.getElementById('chart-pane-rsi');
+    if (candlePane) candlePane.innerHTML = '';
+    if (volumePane) volumePane.innerHTML = '';
+    if (rsiPane) rsiPane.innerHTML = '';
+
     const placeholder = document.getElementById('chart-placeholder');
     const panesWrapper = document.getElementById('chart-panes-wrapper');
     const titleEl = document.getElementById('chart-stock-title');

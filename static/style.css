@@ -218,58 +218,118 @@ body {
     transform: translateY(0);
 }
 
-/* 종합 마켓 지수 섹션 */
+/* 종합 마켓 지수 섹션 (12종 지표 6열 x 2행 최적화) */
 .market-summary-section {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 15px;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 12px;
+}
+
+@media (max-width: 1400px) {
+    .market-summary-section {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (max-width: 992px) {
+    .market-summary-section {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .market-summary-section {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 .summary-card {
     background: var(--bg-card);
     backdrop-filter: blur(12px);
     border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 18px;
-    transition: transform 0.3s ease, border-color 0.3s ease;
+    border-radius: 14px;
+    padding: 14px 16px;
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    user-select: none;
+    position: relative;
+    overflow: hidden;
 }
 
 .summary-card:hover {
     transform: translateY(-3px);
-    border-color: rgba(255, 255, 255, 0.15);
+    border-color: rgba(59, 130, 246, 0.35);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+}
+
+.summary-card.active-card {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 1.5px var(--accent), 0 6px 20px rgba(59, 130, 246, 0.25) !important;
 }
 
 .summary-card .card-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 
 .summary-card .index-title {
     font-family: 'Outfit', sans-serif;
     font-weight: 700;
     color: var(--text-secondary);
-    font-size: 0.9rem;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .summary-card .index-icon {
-    color: rgba(255, 255, 255, 0.2);
-    font-size: 1.1rem;
+    color: rgba(0, 0, 0, 0.2);
+    font-size: 1rem;
+    transition: transform 0.2s ease;
+}
+
+.summary-card:hover .index-icon {
+    transform: scale(1.15);
 }
 
 .summary-card .index-value {
     font-family: 'Outfit', sans-serif;
-    font-size: 1.7rem;
+    font-size: 1.4rem;
     font-weight: 800;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
+    letter-spacing: -0.5px;
+    white-space: nowrap;
 }
 
 .index-change-wrap {
     display: flex;
-    gap: 8px;
-    font-size: 0.85rem;
+    gap: 6px;
+    font-size: 0.8rem;
     font-weight: 600;
+    white-space: nowrap;
+    align-items: baseline;
+}
+
+/* CNN 공포&탐욕 전용 컬러 테마 */
+.fg-extreme-fear {
+    color: #ef4444 !important;
+}
+
+.fg-fear {
+    color: #f97316 !important;
+}
+
+.fg-neutral {
+    color: #eab308 !important;
+}
+
+.fg-greed {
+    color: #84cc16 !important;
+}
+
+.fg-extreme-greed {
+    color: #10b981 !important;
 }
 
 /* 변동 색상 설정 */
@@ -1218,6 +1278,68 @@ tr.drag-over {
     font-weight: 700;
 }
 
+/* RSI(14) 보조지표 컬럼 및 뱃지 스타일 */
+.rsi-cell {
+    text-align: center;
+    vertical-align: middle;
+    padding: 8px 10px !important;
+}
+
+.rsi-badge-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    transition: all 0.2s ease;
+    cursor: default;
+    user-select: none;
+}
+
+.rsi-badge-wrap.rsi-overbought {
+    background: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    color: #ef4444 !important;
+}
+
+.rsi-badge-wrap.rsi-oversold {
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    color: #3b82f6 !important;
+}
+
+.rsi-badge-wrap.rsi-normal {
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    color: #94a3b8;
+}
+
+.rsi-pill {
+    font-size: 0.68rem;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.rsi-pill.pill-overbought {
+    background: #ef4444;
+    color: #ffffff;
+}
+
+.rsi-pill.pill-oversold {
+    background: #3b82f6;
+    color: #ffffff;
+}
+
+.rsi-value-text.rsi-neutral {
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
 /* 차트 플레이스홀더 */
 .chart-placeholder {
     display: flex;
@@ -1492,7 +1614,7 @@ tr.drag-over {
     border-radius: 2px;
 }
 
-/* 일/분/틱 툴바 */
+/* 일/분/틱 및 기간 선택 툴바 */
 .mts-chart-toolbar {
     display: flex;
     justify-content: space-between;
@@ -1502,54 +1624,100 @@ tr.drag-over {
     border-radius: 8px;
     padding: 6px 12px;
     margin-bottom: 2px;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .toolbar-left {
     display: flex;
+    align-items: center;
     gap: 8px;
 }
 
+.period-preset-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.03);
+    padding: 2px;
+    border-radius: 6px;
+}
+
 .mts-tool-btn {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
     font-weight: 700;
     color: #64748b;
-    background: #ffffff;
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    border-radius: 6px;
-    padding: 4px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 9px;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 5px;
-    transition: all 0.2s;
+    gap: 4px;
+    transition: all 0.15s ease;
 }
 
 .mts-tool-btn:hover {
     color: var(--text-primary);
-    border-color: rgba(0, 0, 0, 0.15);
+    background: rgba(0, 0, 0, 0.05);
 }
 
 .mts-tool-btn.active {
-    color: #ffffff;
-    background: #64748b;
-    border-color: #64748b;
+    color: #ffffff !important;
+    background: #0f172a !important;
+    box-shadow: 0 2px 4px rgba(15, 23, 42, 0.15);
 }
 
 .toolbar-right {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 10px;
     color: #64748b;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
 }
 
-.toolbar-right i {
+.zoom-badge-hint {
+    font-size: 0.75rem;
+    color: #64748b;
+    background: rgba(0, 0, 0, 0.04);
+    padding: 3px 8px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    cursor: help;
+    user-select: none;
+}
+
+.zoom-badge-hint i {
+    color: #0f172a;
+    font-size: 0.8rem;
+}
+
+.btn-zoom-reset {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #475569;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    padding: 3px 8px;
     cursor: pointer;
-    transition: color 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.15s ease;
 }
 
-.toolbar-right i:hover {
-    color: var(--text-primary);
+.btn-zoom-reset:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+    border-color: rgba(0, 0, 0, 0.2);
+}
+
+.btn-zoom-reset:active {
+    transform: scale(0.96);
 }
 
 .mts-indicator-toggle {
@@ -1558,9 +1726,41 @@ tr.drag-over {
     font-weight: 800;
     background: #0f172a;
     color: #ffffff;
-    padding: 2px 6px;
+    padding: 3px 7px;
     border-radius: 4px;
     cursor: pointer;
+    user-select: none;
+    transition: opacity 0.15s;
+}
+
+.mts-indicator-toggle:hover {
+    opacity: 0.9;
+}
+
+.mts-indicator-toggle.off {
+    background: #94a3b8;
+}
+
+/* 차트 인터랙티브 커서 및 영역 튜닝 */
+.stock-chart-container {
+    cursor: grab;
+    user-select: none;
+}
+
+.stock-chart-container.panning {
+    cursor: grabbing !important;
+}
+
+.zoom-window-tag {
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #0f172a;
+    background: #e2e8f0;
+    padding: 2px 8px;
+    border-radius: 4px;
+    min-width: 50px;
+    text-align: center;
 }
 
 /* 다크 테마 위장의 잔재 제거 및 라이트 튜닝 */

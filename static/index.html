@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&family=Outfit:wght@300;400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="/style.css?v=3.9.0">
+    <link rel="stylesheet" href="/style.css?v=4.0.0">
     <!-- ApexCharts -->
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
 </head>
@@ -104,6 +104,34 @@
                     </div>
                 </div>
             </div>
+            <!-- S&P 500 -->
+            <div class="summary-card index-trigger-card" id="card-sp500" data-code="SP500" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">S&P 500</span>
+                    <i class="fa-solid fa-arrow-trend-up index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-sp500-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-sp500-change">-</span>
+                        <span class="index-rate" id="val-sp500-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- 다우 존스 -->
+            <div class="summary-card index-trigger-card" id="card-dji" data-code="DJI" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">다우 존스</span>
+                    <i class="fa-solid fa-chart-simple index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-dji-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-dji-change">-</span>
+                        <span class="index-rate" id="val-dji-rate">-</span>
+                    </div>
+                </div>
+            </div>
             <!-- WTI 유가 -->
             <div class="summary-card index-trigger-card" id="card-wti" data-code="OIL_CL" style="cursor: pointer;">
                 <div class="card-header">
@@ -129,6 +157,62 @@
                     <div class="index-change-wrap">
                         <span class="index-change" id="val-gold-change">-</span>
                         <span class="index-rate" id="val-gold-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- 美 10년 국채금리 -->
+            <div class="summary-card index-trigger-card" id="card-us10y" data-code="US10Y" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">美 10년 국채</span>
+                    <i class="fa-solid fa-landmark index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-us10y-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-us10y-change">-</span>
+                        <span class="index-rate" id="val-us10y-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- 美 30년 국채금리 -->
+            <div class="summary-card index-trigger-card" id="card-us30y" data-code="US30Y" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">美 30년 국채</span>
+                    <i class="fa-solid fa-building-columns index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-us30y-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-us30y-change">-</span>
+                        <span class="index-rate" id="val-us30y-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- VIX 변동성지수 -->
+            <div class="summary-card index-trigger-card" id="card-vix" data-code="VIX" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">VIX 변동성</span>
+                    <i class="fa-solid fa-gauge-high index-icon"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-vix-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-vix-change">-</span>
+                        <span class="index-rate" id="val-vix-rate">-</span>
+                    </div>
+                </div>
+            </div>
+            <!-- CNN 공포&탐욕 지수 -->
+            <div class="summary-card index-trigger-card card-fear-greed" id="card-feargreed" data-code="FEAR_GREED" style="cursor: pointer;">
+                <div class="card-header">
+                    <span class="index-title">CNN 공포&탐욕</span>
+                    <i class="fa-solid fa-face-smile-beam index-icon" id="icon-fg-mood"></i>
+                </div>
+                <div class="card-body">
+                    <h2 class="index-value" id="val-feargreed-price">-</h2>
+                    <div class="index-change-wrap">
+                        <span class="index-change" id="val-feargreed-rating">중립</span>
+                        <span class="index-rate" id="val-feargreed-change">-</span>
                     </div>
                 </div>
             </div>
@@ -363,6 +447,7 @@
                                     <th>보유 수량</th>
                                     <th>평가 금액</th>
                                     <th>평단대비</th>
+                                    <th title="상대강도지수 (14일 기준): 70 이상 과매수, 30 이하 과매도">RSI (14)</th>
                                     <th>거래량</th>
                                     <th>관리</th>
                                 </tr>
@@ -412,18 +497,25 @@
 
 
 
-                            <!-- 일/분/틱 및 차트 도구 설정 바 -->
+                            <!-- 일/분/틱 및 기간 선택 & 줌 툴바 -->
                             <div class="mts-chart-toolbar">
                                 <div class="toolbar-left">
-                                    <span class="mts-tool-btn active">일 <i class="fa-solid fa-caret-down"></i></span>
-                                    <span class="mts-tool-btn">분 <i class="fa-solid fa-caret-down"></i></span>
-                                    <span class="mts-tool-btn">틱 <i class="fa-solid fa-caret-down"></i></span>
+                                    <div class="period-preset-group" id="chart-period-presets">
+                                        <button type="button" class="mts-tool-btn" data-period="20">1개월</button>
+                                        <button type="button" class="mts-tool-btn active" data-period="60">3개월</button>
+                                        <button type="button" class="mts-tool-btn" data-period="120">6개월</button>
+                                        <button type="button" class="mts-tool-btn" data-period="250">1년</button>
+                                        <button type="button" class="mts-tool-btn" data-period="all">전체</button>
+                                    </div>
                                 </div>
                                 <div class="toolbar-right">
-                                    <span class="mts-indicator-toggle">ON</span>
-                                    <i class="fa-regular fa-copy"></i>
-                                    <i class="fa-solid fa-gear"></i>
-                                    <i class="fa-solid fa-wrench"></i>
+                                    <span class="zoom-badge-hint" title="차트 위에서 마우스 휠을 굴려 확대/축소, 드래그로 좌우 이동할 수 있습니다.">
+                                        <i class="fa-solid fa-arrows-up-down-left-right"></i> 휠 확대/축소 & 드래그
+                                    </span>
+                                    <button type="button" class="btn-zoom-reset" id="btn-chart-zoom-reset" title="기본 60봉 뷰로 초기화">
+                                        <i class="fa-solid fa-rotate-left"></i> 줌 리셋
+                                    </button>
+                                    <span class="mts-indicator-toggle" id="btn-toggle-indicators" title="보조지표 표시/숨김">ON</span>
                                 </div>
                             </div>
                         </div>
@@ -441,6 +533,7 @@
                                     <span class="date-label min-date" id="scrollbar-min-date">과거</span>
                                     <input type="range" id="chart-timeline-slider" class="chart-range-slider" min="0" max="540" value="540">
                                     <span class="date-label max-date" id="scrollbar-max-date">최신</span>
+                                    <span class="zoom-window-tag" id="chart-zoom-window-tag">60봉</span>
                                 </div>
                             </div>
                         </div>
@@ -636,6 +729,6 @@ setInterval(stockEngine, <span class="code-number">3000</span>);
         </div>
     </div>
 
-    <script src="/app.js?v=3.9.0"></script>
+    <script src="/app.js?v=4.0.0"></script>
 </body>
 </html>

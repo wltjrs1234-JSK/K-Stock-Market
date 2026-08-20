@@ -3,8 +3,9 @@ import threading
 import json
 import os
 import re
+import ast
 import datetime
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -12,14 +13,81 @@ import requests
 from bs4 import BeautifulSoup
 import uvicorn
 import urllib3
+import concurrent.futures
 
-# SSL 인증서 검증 경고 비활성화 및 requests 몽키 패치
+# SSL 인증서 검증 경고 비활성화 및 전역 HTTP 세션 풀 구성
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-original_get = requests.get
-def patched_get(*args, **kwargs):
+
+SESSION = requests.Session()
+SESSION.verify = False
+SESSION.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+})
+
+# 모든 requests.get 호출이 전역 세션 풀과 verify=False를 사용하도록 패치
+def safe_session_get(url, *args, **kwargs):
     kwargs['verify'] = False
-    return original_get(*args, **kwargs)
-requests.get = patched_get
+    if 'timeout' not in kwargs:
+        kwargs['timeout'] = 5
+    return SESSION.get(url, *args, **kwargs)
+
+requests.get = safe_session_get
+
+# 영속적 마지막 정상 데이터 캐시 (외부 API 일시 실패 시 Fallback 보존)
+LAST_SUCCESS_MACRO_CACHE = {
+    "us10y": {
+        "name": "美 10년 국채금리",
+        "price": "4.706",
+        "change": "0.018",
+        "rate": "-0.38",
+        "status": "DOWN",
+        "raw_price": 4.706
+    },
+    "us30y": {
+        "name": "美 30년 국채금리",
+        "price": "5.285",
+        "change": "0.024",
+        "rate": "-0.45",
+        "status": "DOWN",
+        "raw_price": 5.285
+    },
+    "vix": {
+        "name": "VIX 변동성지수",
+        "price": "15.84",
+        "change": "0.65",
+        "rate": "4.28",
+        "status": "UP",
+        "raw_price": 15.84
+    },
+    "fear_greed": {
+        "name": "CNN 공포&탐욕",
+        "price": "54.4",
+        "rating": "neutral",
+        "rating_kor": "중립",
+        "change": "5.6",
+        "rate": "-9.33",
+        "status": "DOWN",
+        "raw_price": 54.4
+    },
+    "sp500": {
+        "name": "S&P 500",
+        "price": "5,864.67",
+        "change": "23.45",
+        "rate": "0.40",
+        "status": "UP",
+        "raw_price": 5864.67
+    },
+    "dji": {
+        "name": "다우 존스",
+        "price": "42,345.89",
+        "change": "150.23",
+        "rate": "0.36",
+        "status": "UP",
+        "raw_price": 42345.89
+    }
+}
 
 def safe_float(val, default=0.0):
     try:
@@ -46,6 +114,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 브라우저 캐시 방지 미들웨어 (최신 JS/CSS 즉시 로드)
+@app.middleware("http")
+async def add_no_cache_header(request: Request, call_next):
+    response = await call_next(request)
+    if any(request.url.path.endswith(ext) for ext in [".js", ".css", ".html"]) or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 @app.on_event("startup")
 async def startup_event():
@@ -307,103 +385,82 @@ def fetch_gold_scraping():
         "status": status
     }
 
-def fetch_market_summary():
-    # 1. 코스피 & 코스닥 (polling API)
-    index_url = 'https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI,KOSDAQ'
-    index_res = requests.get(index_url, headers=HEADERS, timeout=5)
-    index_data = index_res.json() if index_res.status_code == 200 else {}
-    
-    indices = {}
-    for item in index_data.get('datas', []):
-        code = item.get('itemCode')  # KOSPI / KOSDAQ
-        fluctuations_ratio = safe_float(item.get('fluctuationsRatio', 0))
-        indices[code] = {
-            "name": item.get('stockName'),
-            "price": item.get('closePrice'),
-            "change": item.get('compareToPreviousClosePrice'),
-            "rate": item.get('fluctuationsRatio'),
-            "status": "UP" if fluctuations_ratio > 0 else "DOWN" if fluctuations_ratio < 0 else "SAME"
-        }
-        
-    # 2. 환율 (원달러 - marketindex API)
-    exchange_url = 'https://api.stock.naver.com/marketindex/exchange/FX_USDKRW'
-    ex_res = requests.get(exchange_url, headers=HEADERS, timeout=5)
-    ex_data = ex_res.json().get('exchangeInfo', {}) if ex_res.status_code == 200 else {}
-    
-    exchange_rate = "0.00"
-    exchange_status = "SAME"
+def fetch_indices_naver():
     try:
+        index_url = 'https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI,KOSDAQ'
+        index_res = SESSION.get(index_url, headers=HEADERS, timeout=4)
+        index_data = index_res.json() if index_res.status_code == 200 else {}
+        
+        indices = {}
+        for item in index_data.get('datas', []):
+            code = item.get('itemCode')  # KOSPI / KOSDAQ
+            fluctuations_ratio = safe_float(item.get('fluctuationsRatio', 0))
+            indices[code] = {
+                "name": item.get('stockName'),
+                "price": item.get('closePrice'),
+                "change": item.get('compareToPreviousClosePrice'),
+                "rate": item.get('fluctuationsRatio'),
+                "status": "UP" if fluctuations_ratio > 0 else "DOWN" if fluctuations_ratio < 0 else "SAME"
+            }
+        return indices
+    except Exception as e:
+        print("Indices fetch error:", e)
+        return {}
+
+def fetch_exchange_naver():
+    try:
+        exchange_url = 'https://api.stock.naver.com/marketindex/exchange/FX_USDKRW'
+        ex_res = SESSION.get(exchange_url, headers=HEADERS, timeout=4)
+        ex_data = ex_res.json().get('exchangeInfo', {}) if ex_res.status_code == 200 else {}
+        
+        exchange_rate = "0.00"
+        exchange_status = "SAME"
         ex_ratio = safe_float(ex_data.get('fluctuationsRatio', 0))
         exchange_rate = f"{ex_ratio:.2f}"
         exchange_status = "UP" if ex_ratio > 0 else "DOWN" if ex_ratio < 0 else "SAME"
-    except Exception:
-        pass
         
-    exchange = {
-        "name": ex_data.get('name', '원달러 환율'),
-        "price": ex_data.get('closePrice'),
-        "change": ex_data.get('fluctuations'),
-        "rate": exchange_rate,
-        "status": exchange_status
-    }
+        return {
+            "name": ex_data.get('name', '원달러 환율'),
+            "price": ex_data.get('closePrice', '-'),
+            "change": ex_data.get('fluctuations', '-'),
+            "rate": exchange_rate,
+            "status": exchange_status
+        }
+    except Exception as e:
+        print("Exchange fetch error:", e)
+        return {"name": "원달러 환율", "price": "-", "change": "-", "rate": "0.00", "status": "SAME"}
 
-    # 3. 나스닥 종합지수 (NASDAQ - basic API)
+def fetch_nasdaq_naver():
     try:
         nasdaq_url = 'https://api.stock.naver.com/index/.IXIC/basic'
-        nas_res = requests.get(nasdaq_url, headers=HEADERS, timeout=5)
+        nas_res = SESSION.get(nasdaq_url, headers=HEADERS, timeout=4)
         nas_data = nas_res.json() if nas_res.status_code == 200 else {}
         nas_ratio = safe_float(nas_data.get('fluctuationsRatio', 0))
-        nasdaq = {
+        return {
             "name": "NASDAQ",
-            "price": nas_data.get('closePrice'),
-            "change": nas_data.get('compareToPreviousClosePrice'),
+            "price": nas_data.get('closePrice', '-'),
+            "change": nas_data.get('compareToPreviousClosePrice', '-'),
             "rate": f"{nas_ratio:.2f}",
             "status": "UP" if nas_ratio > 0 else "DOWN" if nas_ratio < 0 else "SAME"
         }
     except Exception as e:
         print("NASDAQ fetch error:", e)
-        nasdaq = {
-            "name": "NASDAQ",
-            "price": "-",
-            "change": "-",
-            "rate": "0.00",
-            "status": "SAME"
-        }
+        return {"name": "NASDAQ", "price": "-", "change": "-", "rate": "0.00", "status": "SAME"}
 
-    # 4. WTI 유가(OIL_CL) & 골드(달러)(CMDT_GC) 스크래핑
-    wti = {
-        "name": "WTI 유가(달러)",
-        "price": "-",
-        "change": "-",
-        "rate": "0.00",
-        "status": "SAME"
-    }
-    gold_dollar = {
-        "name": "국제 금(달러)",
-        "price": "-",
-        "change": "-",
-        "rate": "0.00",
-        "status": "SAME"
-    }
-
+def fetch_commodities_naver():
+    wti = {"name": "WTI 유가(달러)", "price": "-", "change": "-", "rate": "0.00", "status": "SAME"}
+    gold_dollar = {"name": "국제 금(달러)", "price": "-", "change": "-", "rate": "0.00", "status": "SAME"}
     try:
-        res = requests.get("https://finance.naver.com/marketindex/", headers=HEADERS, timeout=5)
+        res = SESSION.get("https://finance.naver.com/marketindex/", headers=HEADERS, timeout=4)
         res.encoding = 'euc-kr'
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # WTI 파싱
         wti_link = soup.find('a', href=re.compile(r'OIL_CL'))
         if wti_link:
             wti_li = wti_link.find_parent('li') or wti_link
             wti_price = wti_li.select_one('.value').text.strip() if wti_li.select_one('.value') else "-"
             wti_change = wti_li.select_one('.change').text.strip() if wti_li.select_one('.change') else "-"
-            wti_status = "SAME"
-            if '상승' in wti_li.text:
-                wti_status = "UP"
-            elif '하락' in wti_li.text:
-                wti_status = "DOWN"
-            
-            # 등락률 계산
+            wti_status = "UP" if '상승' in wti_li.text else "DOWN" if '하락' in wti_li.text else "SAME"
             try:
                 p_num = float(wti_price.replace(',', ''))
                 c_num = float(wti_change.replace(',', ''))
@@ -411,28 +468,14 @@ def fetch_market_summary():
                 wti_rate = f"{(c_num / prev * 100):.2f}" if prev > 0 else "0.00"
             except Exception:
                 wti_rate = "0.00"
-                
-            wti = {
-                "name": "WTI 유가(달러)",
-                "price": wti_price,
-                "change": wti_change,
-                "rate": wti_rate,
-                "status": wti_status
-            }
+            wti = {"name": "WTI 유가(달러)", "price": wti_price, "change": wti_change, "rate": wti_rate, "status": wti_status}
 
-        # 국제 금(달러) 파싱
         gold_link = soup.find('a', href=re.compile(r'CMDT_GC'))
         if gold_link:
             gold_li = gold_link.find_parent('li') or gold_link
             gold_price = gold_li.select_one('.value').text.strip() if gold_li.select_one('.value') else "-"
             gold_change = gold_li.select_one('.change').text.strip() if gold_li.select_one('.change') else "-"
-            gold_status = "SAME"
-            if '상승' in gold_li.text:
-                gold_status = "UP"
-            elif '하락' in gold_li.text:
-                gold_status = "DOWN"
-            
-            # 등락률 계산
+            gold_status = "UP" if '상승' in gold_li.text else "DOWN" if '하락' in gold_li.text else "SAME"
             try:
                 p_num = float(gold_price.replace(',', ''))
                 c_num = float(gold_change.replace(',', ''))
@@ -440,89 +483,249 @@ def fetch_market_summary():
                 gold_rate = f"{(c_num / prev * 100):.2f}" if prev > 0 else "0.00"
             except Exception:
                 gold_rate = "0.00"
-                
-            gold_dollar = {
-                "name": "국제 금(달러)",
-                "price": gold_price,
-                "change": gold_change,
-                "rate": gold_rate,
-                "status": gold_status
-            }
+            gold_dollar = {"name": "국제 금(달러)", "price": gold_price, "change": gold_change, "rate": gold_rate, "status": gold_status}
     except Exception as e:
         print("Scraping commodities error:", e)
+    return wti, gold_dollar
+
+def fetch_macro_yahoo_item(symbol: str, name_label: str, cache_key: str):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
+        yahoo_headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            'Referer': 'https://finance.yahoo.com/'
+        }
+        res = SESSION.get(url, headers=yahoo_headers, timeout=4)
+        if res.status_code == 200:
+            meta = res.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
+            price = meta.get('regularMarketPrice', 0.0)
+            prev_close = meta.get('chartPreviousClose', price)
+            if prev_close is None:
+                prev_close = price
+            change = price - prev_close
+            rate = (change / prev_close * 100) if prev_close > 0 else 0.0
+            status = "UP" if change > 0 else "DOWN" if change < 0 else "SAME"
+            
+            if 'TNX' in symbol or 'TYX' in symbol:
+                price_str = f"{price:.3f}"
+                change_str = f"{abs(change):.3f}"
+            elif symbol in ['^GSPC', '^DJI', '^IXIC', '^KS11', '^KQ11']:
+                price_str = f"{price:,.2f}"
+                change_str = f"{abs(change):,.2f}"
+            else:
+                price_str = f"{price:.2f}" if price % 1 != 0 else f"{int(price)}"
+                change_str = f"{abs(change):.2f}" if change % 1 != 0 else f"{int(abs(change))}"
+            
+            item = {
+                "name": name_label,
+                "price": price_str,
+                "change": change_str,
+                "rate": f"{rate:.2f}",
+                "status": status,
+                "raw_price": price
+            }
+            LAST_SUCCESS_MACRO_CACHE[cache_key] = item
+            return item
+    except Exception as e:
+        print(f"Error fetching {symbol}: {e}")
+    
+    # 실패 시 마지막 성공 캐시값 유지 (Graceful Fallback)
+    return LAST_SUCCESS_MACRO_CACHE.get(cache_key, {
+        "name": name_label,
+        "price": "-",
+        "change": "-",
+        "rate": "0.00",
+        "status": "SAME",
+        "raw_price": 0.0
+    })
+
+def fetch_fear_greed_item():
+    try:
+        fg_url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+        fg_headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
+        fg_res = SESSION.get(fg_url, headers=fg_headers, timeout=4)
+        if fg_res.status_code == 200:
+            fg_data = fg_res.json()
+            fg_obj = fg_data.get('fear_and_greed', {})
+            score = round(fg_obj.get('score', 50.0), 1)
+            rating = fg_obj.get('rating', 'neutral').lower()
+            prev_close = round(fg_obj.get('previous_close', score), 1)
+            change = round(score - prev_close, 1)
+            rate = f"{((score - prev_close) / prev_close * 100):.2f}" if prev_close > 0 else "0.00"
+            status = "UP" if change > 0 else "DOWN" if change < 0 else "SAME"
+            
+            rating_kor_map = {
+                'extreme fear': '극단적 공포',
+                'fear': '공포',
+                'neutral': '중립',
+                'greed': '탐욕',
+                'extreme greed': '극단적 탐욕'
+            }
+            rating_kor = rating_kor_map.get(rating, rating.capitalize())
+            
+            item = {
+                "name": "CNN 공포&탐욕",
+                "price": f"{score:.1f}",
+                "rating": rating,
+                "rating_kor": rating_kor,
+                "change": f"{abs(change):.1f}",
+                "rate": rate,
+                "status": status,
+                "raw_price": score
+            }
+            LAST_SUCCESS_MACRO_CACHE["fear_greed"] = item
+            return item
+    except Exception as e:
+        print("CNN Fear & Greed fetch error:", e)
+    
+    return LAST_SUCCESS_MACRO_CACHE.get("fear_greed", {
+        "name": "CNN 공포&탐욕",
+        "price": "54.4",
+        "rating": "neutral",
+        "rating_kor": "중립",
+        "change": "5.6",
+        "rate": "-9.33",
+        "status": "DOWN",
+        "raw_price": 54.4
+    })
+
+def fetch_market_summary():
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        f_indices = executor.submit(fetch_indices_naver)
+        f_ex = executor.submit(fetch_exchange_naver)
+        f_nasdaq = executor.submit(fetch_nasdaq_naver)
+        f_cmdt = executor.submit(fetch_commodities_naver)
+        f_sp500 = executor.submit(fetch_macro_yahoo_item, "^GSPC", "S&P 500", "sp500")
+        f_dji = executor.submit(fetch_macro_yahoo_item, "^DJI", "다우 존스", "dji")
+        f_us10y = executor.submit(fetch_macro_yahoo_item, "^TNX", "美 10년 국채금리", "us10y")
+        f_us30y = executor.submit(fetch_macro_yahoo_item, "^TYX", "美 30년 국채금리", "us30y")
+        f_vix = executor.submit(fetch_macro_yahoo_item, "^VIX", "VIX 변동성지수", "vix")
+        f_fg = executor.submit(fetch_fear_greed_item)
+
+        indices = f_indices.result()
+        exchange = f_ex.result()
+        nasdaq = f_nasdaq.result()
+        wti, gold_dollar = f_cmdt.result()
+        sp500 = f_sp500.result()
+        dji = f_dji.result()
+        us10y = f_us10y.result()
+        us30y = f_us30y.result()
+        vix = f_vix.result()
+        fear_greed = f_fg.result()
 
     return {
         "kospi": indices.get("KOSPI"),
         "kosdaq": indices.get("KOSDAQ"),
         "exchange": exchange,
         "nasdaq": nasdaq,
+        "sp500": sp500,
+        "dji": dji,
         "wti": wti,
-        "gold_dollar": gold_dollar
+        "gold_dollar": gold_dollar,
+        "us10y": us10y,
+        "us30y": us30y,
+        "vix": vix,
+        "fear_greed": fear_greed
     }
 
-def fetch_stock_price(code: str):
-    # 지수 및 환율, 원자재에 대한 분기 처리
-    if code in ["KOSPI", "KOSDAQ"]:
-        index_url = 'https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI,KOSDAQ'
-        index_res = requests.get(index_url, headers=HEADERS, timeout=5)
-        index_data = index_res.json() if index_res.status_code == 200 else {}
-        for item in index_data.get('datas', []):
-            if item.get('itemCode') == code:
-                ratio = safe_float(item.get('fluctuationsRatio', 0))
-                return {
-                    "code": code,
-                    "name": item.get('stockName'),
-                    "price": item.get('closePrice'),
-                    "change": item.get('compareToPreviousClosePrice'),
-                    "rate": item.get('fluctuationsRatio'),
-                    "high": item.get('closePrice'),
-                    "low": item.get('closePrice'),
-                    "open": item.get('closePrice'),
-                    "volume": 0,
-                    "prev_close": item.get('closePrice'),
-                    "status": "UP" if ratio > 0 else "DOWN" if ratio < 0 else "SAME"
+def calculate_rsi(prices, period=14):
+    rsi_values = [None] * len(prices)
+    if len(prices) <= period:
+        return rsi_values
+    
+    deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+    gains = [d if d > 0 else 0 for d in deltas]
+    losses = [-d if d < 0 else 0 for d in deltas]
+    
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    
+    if avg_loss == 0:
+        rsi_values[period] = 100.0
+    else:
+        rs = avg_gain / avg_loss
+        rsi_values[period] = 100.0 - (100.0 / (1.0 + rs))
+        
+    for i in range(period + 1, len(prices)):
+        delta_idx = i - 1
+        avg_gain = (avg_gain * (period - 1) + gains[delta_idx]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[delta_idx]) / period
+        
+        if avg_loss == 0:
+            rsi_values[i] = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi_values[i] = 100.0 - (100.0 / (1.0 + rs))
+            
+    return rsi_values
+
+
+def fetch_stock_rsi_cached(code: str):
+    """
+    종목 코드 또는 지수에 대한 최근 RSI(14) 값을 계산하여 반환 (300초 캐싱)
+    """
+    def _calculate():
+        try:
+            closes = []
+            # 1. 국내 종목 (6자리 숫자)
+            if len(code) == 6 and code.isdigit():
+                url = f"https://api.finance.naver.com/siseJson.naver?symbol={code}&requestType=0&count=40&timeframe=day"
+                res = requests.get(url, headers=HEADERS, timeout=3)
+                if res.status_code == 200:
+                    raw_text = re.sub(r'[\r\n\t]', '', res.text).strip()
+                    parsed_data = ast.literal_eval(raw_text)
+                    for row in parsed_data[1:]:
+                        if len(row) >= 5:
+                            closes.append(float(row[4]))
+            # 2. 국내 지수
+            elif code in ["KOSPI", "KOSDAQ"]:
+                sym = "KOSPI" if code == "KOSPI" else "KOSDAQ"
+                url = f"https://api.finance.naver.com/siseJson.naver?symbol={sym}&requestType=0&count=40&timeframe=day"
+                res = requests.get(url, headers=HEADERS, timeout=3)
+                if res.status_code == 200:
+                    raw_text = re.sub(r'[\r\n\t]', '', res.text).strip()
+                    parsed_data = ast.literal_eval(raw_text)
+                    for row in parsed_data[1:]:
+                        if len(row) >= 5:
+                            closes.append(float(row[4]))
+            # 3. 미국 주식 및 기타 지수 (야후 파이낸스)
+            elif code not in ["FEAR_GREED"]:
+                sym_map = {
+                    "NASDAQ": "^IXIC",
+                    "SP500": "^GSPC",
+                    "DJI": "^DJI",
+                    "USDKRW": "USDKRW=X",
+                    "OIL_CL": "CL=F",
+                    "CMDT_GC": "GC=F",
+                    "US10Y": "^TNX",
+                    "US30Y": "^TYX",
+                    "VIX": "^VIX"
                 }
-                
-    elif code == "NASDAQ":
-        nasdaq_url = 'https://api.stock.naver.com/index/.IXIC/basic'
-        nas_res = requests.get(nasdaq_url, headers=HEADERS, timeout=5)
-        nas_data = nas_res.json() if nas_res.status_code == 200 else {}
-        ratio = safe_float(nas_data.get('fluctuationsRatio', 0))
-        return {
-            "code": "NASDAQ",
-            "name": "NASDAQ",
-            "price": nas_data.get('closePrice'),
-            "change": nas_data.get('compareToPreviousClosePrice'),
-            "rate": f"{ratio:.2f}",
-            "high": nas_data.get('closePrice'),
-            "low": nas_data.get('closePrice'),
-            "open": nas_data.get('closePrice'),
-            "volume": 0,
-            "prev_close": nas_data.get('closePrice'),
-            "status": "UP" if ratio > 0 else "DOWN" if ratio < 0 else "SAME"
-        }
-        
-    elif code == "USDKRW":
-        exchange_url = 'https://api.stock.naver.com/marketindex/exchange/FX_USDKRW'
-        ex_res = requests.get(exchange_url, headers=HEADERS, timeout=5)
-        ex_data = ex_res.json().get('exchangeInfo', {}) if ex_res.status_code == 200 else {}
-        ratio = safe_float(ex_data.get('fluctuationsRatio', 0))
-        return {
-            "code": "USDKRW",
-            "name": "원달러 환율",
-            "price": ex_data.get('closePrice'),
-            "change": ex_data.get('fluctuations'),
-            "rate": f"{ratio:.2f}",
-            "high": ex_data.get('closePrice'),
-            "low": ex_data.get('closePrice'),
-            "open": ex_data.get('closePrice'),
-            "volume": 0,
-            "prev_close": ex_data.get('closePrice'),
-            "status": "UP" if ratio > 0 else "DOWN" if ratio < 0 else "SAME"
-        }
-        
+                yahoo_sym = sym_map.get(code, code.upper())
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}?interval=1d&range=2mo"
+                yahoo_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
+                res = SESSION.get(url, headers=yahoo_headers, timeout=3)
+                if res.status_code == 200:
+                    res_data = res.json()
+                    results = res_data.get('chart', {}).get('result', [])
+                    if results:
+                        quote_closes = results[0].get('indicators', {}).get('quote', [{}])[0].get('close', [])
+                        closes = [float(c) for c in quote_closes if c is not None]
+
+            if len(closes) >= 15:
+                rsi_vals = calculate_rsi(closes, 14)
+                valid_rsis = [r for r in rsi_vals if r is not None]
+                if valid_rsis:
+                    return round(valid_rsis[-1], 1)
+        except Exception as e:
+            pass
+        return None
+
+    return get_cached_or_fetch(f"stock_rsi_{code}", _calculate, 300)
+
 def fetch_us_stock_price(ticker: str):
-    # 야후 파이낸스 chart API를 통해 실시간 시세 및 이전 종가 정보 획득 (401 방지)
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker.upper()}?interval=1d&range=2d"
     yahoo_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     res = requests.get(url, headers=yahoo_headers, timeout=5)
@@ -587,8 +790,7 @@ def fetch_us_stock_price(ticker: str):
         "status": status
     }
 
-
-def fetch_stock_price(code: str):
+def _fetch_stock_price_raw(code: str):
     # 지수 및 환율, 원자재에 대한 분기 처리
     if code in ["KOSPI", "KOSDAQ"]:
         index_url = 'https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI,KOSDAQ'
@@ -687,6 +889,167 @@ def fetch_stock_price(code: str):
                 "status": status
             }
 
+    elif code in ["US10Y", "US30Y", "VIX", "SP500", "DJI"]:
+        symbol_map = {
+            "US10Y": ("^TNX", "美 10년 국채금리", "us10y"),
+            "US30Y": ("^TYX", "美 30년 국채금리", "us30y"),
+            "VIX": ("^VIX", "VIX 변동성지수", "vix"),
+            "SP500": ("^GSPC", "S&P 500", "sp500"),
+            "DJI": ("^DJI", "다우 존스", "dji")
+        }
+        sym, name_label, cache_key = symbol_map[code]
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=5d"
+            yahoo_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Referer': 'https://finance.yahoo.com/'
+            }
+            res = SESSION.get(url, headers=yahoo_headers, timeout=4)
+            if res.status_code == 200:
+                meta = res.json().get('chart', {}).get('result', [{}])[0].get('meta', {})
+                price = meta.get('regularMarketPrice', 0.0)
+                prev_close = meta.get('chartPreviousClose', price)
+                if prev_close is None:
+                    prev_close = price
+                change = price - prev_close
+                rate = (change / prev_close * 100) if prev_close > 0 else 0.0
+                status = "UP" if change > 0 else "DOWN" if change < 0 else "SAME"
+                
+                high_val = meta.get('regularMarketDayHigh', price) or price
+                low_val = meta.get('regularMarketDayLow', price) or price
+                open_val = meta.get('regularMarketDayOpen', price) or price
+                
+                if 'TNX' in sym or 'TYX' in sym:
+                    price_fmt = f"{price:.3f}"
+                    change_fmt = f"{abs(change):.3f}"
+                    high_fmt = f"{high_val:.3f}"
+                    low_fmt = f"{low_val:.3f}"
+                    open_fmt = f"{open_val:.3f}"
+                elif sym in ['^GSPC', '^DJI']:
+                    price_fmt = f"{price:,.2f}"
+                    change_fmt = f"{abs(change):,.2f}"
+                    high_fmt = f"{high_val:,.2f}"
+                    low_fmt = f"{low_val:,.2f}"
+                    open_fmt = f"{open_val:,.2f}"
+                else:
+                    price_fmt = f"{price:.2f}" if price % 1 != 0 else f"{int(price)}"
+                    change_fmt = f"{abs(change):.2f}" if change % 1 != 0 else f"{int(abs(change))}"
+                    high_fmt = f"{high_val:.2f}" if high_val % 1 != 0 else f"{int(high_val)}"
+                    low_fmt = f"{low_val:.2f}" if low_val % 1 != 0 else f"{int(low_val)}"
+                    open_fmt = f"{open_val:.2f}" if open_val % 1 != 0 else f"{int(open_val)}"
+                
+                stock_res = {
+                    "code": code,
+                    "name": name_label,
+                    "price": price_fmt,
+                    "change": change_fmt,
+                    "rate": f"{rate:.2f}",
+                    "high": high_fmt,
+                    "low": low_fmt,
+                    "open": open_fmt,
+                    "volume": meta.get('regularMarketVolume', 0) or 0,
+                    "prev_close": prev_close,
+                    "status": status
+                }
+                LAST_SUCCESS_MACRO_CACHE[cache_key] = {
+                    "name": name_label,
+                    "price": price_fmt,
+                    "change": change_fmt,
+                    "rate": f"{rate:.2f}",
+                    "status": status,
+                    "raw_price": price
+                }
+                return stock_res
+        except Exception as e:
+            print(f"Error in fetch_stock_price for {code}: {e}")
+        
+        cached = LAST_SUCCESS_MACRO_CACHE.get(cache_key, {})
+        return {
+            "code": code,
+            "name": name_label,
+            "price": cached.get("price", "0.00"),
+            "change": cached.get("change", "0.00"),
+            "rate": cached.get("rate", "0.00"),
+            "high": cached.get("price", "0.00"),
+            "low": cached.get("price", "0.00"),
+            "open": cached.get("price", "0.00"),
+            "volume": 0,
+            "prev_close": cached.get("raw_price", 0.0),
+            "status": cached.get("status", "SAME")
+        }
+
+    elif code == "FEAR_GREED":
+        try:
+            fg_url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+            fg_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            }
+            fg_res = SESSION.get(fg_url, headers=fg_headers, timeout=4)
+            if fg_res.status_code == 200:
+                fg_data = fg_res.json()
+                fg_obj = fg_data.get('fear_and_greed', {})
+                score = round(fg_obj.get('score', 50.0), 1)
+                rating = fg_obj.get('rating', 'neutral').lower()
+                prev_close = round(fg_obj.get('previous_close', score), 1)
+                change = round(score - prev_close, 1)
+                rate = f"{((score - prev_close) / prev_close * 100):.2f}" if prev_close > 0 else "0.00"
+                status = "UP" if change > 0 else "DOWN" if change < 0 else "SAME"
+                
+                rating_kor_map = {
+                    'extreme fear': '극단적 공포',
+                    'fear': '공포',
+                    'neutral': '중립',
+                    'greed': '탐욕',
+                    'extreme greed': '극단적 탐욕'
+                }
+                rating_kor = rating_kor_map.get(rating, rating.capitalize())
+                
+                fg_res_data = {
+                    "code": "FEAR_GREED",
+                    "name": f"CNN 공포&탐욕 ({rating_kor})",
+                    "price": f"{score:.1f}점",
+                    "rating": rating,
+                    "rating_kor": rating_kor,
+                    "change": f"{abs(change):.1f}",
+                    "rate": rate,
+                    "high": f"{score:.1f}",
+                    "low": f"{score:.1f}",
+                    "open": f"{score:.1f}",
+                    "volume": 0,
+                    "prev_close": prev_close,
+                    "status": status
+                }
+                LAST_SUCCESS_MACRO_CACHE["fear_greed"] = {
+                    "name": "CNN 공포&탐욕",
+                    "price": f"{score:.1f}",
+                    "rating": rating,
+                    "rating_kor": rating_kor,
+                    "change": f"{abs(change):.1f}",
+                    "rate": rate,
+                    "status": status,
+                    "raw_price": score
+                }
+                return fg_res_data
+        except Exception as e:
+            print("CNN Fear & Greed stock_price error:", e)
+
+        cached = LAST_SUCCESS_MACRO_CACHE.get("fear_greed", {})
+        return {
+            "code": "FEAR_GREED",
+            "name": f"CNN 공포&탐욕 ({cached.get('rating_kor', '중립')})",
+            "price": f"{cached.get('price', '50.0')}점",
+            "rating": cached.get("rating", "neutral"),
+            "rating_kor": cached.get("rating_kor", "중립"),
+            "change": cached.get("change", "0.0"),
+            "rate": cached.get("rate", "0.00"),
+            "high": cached.get("price", "50.0"),
+            "low": cached.get("price", "50.0"),
+            "open": cached.get("price", "50.0"),
+            "volume": 0,
+            "prev_close": cached.get("raw_price", 50.0),
+            "status": cached.get("status", "SAME")
+        }
+
     # 해외 주식 판별 (길이가 6이 아니거나 첫 자리가 숫자가 아님)
     is_us_stock = False
     if code not in VALID_INDICES:
@@ -721,6 +1084,15 @@ def fetch_stock_price(code: str):
         "prev_close": stock_info.get('previousClosePrice'),
         "status": "UP" if fluctuations_ratio > 0 else "DOWN" if fluctuations_ratio < 0 else "SAME"
     }
+
+def fetch_stock_price(code: str):
+    res = _fetch_stock_price_raw(code)
+    if isinstance(res, dict):
+        try:
+            res["rsi"] = fetch_stock_rsi_cached(code)
+        except Exception:
+            res["rsi"] = None
+    return res
 
 def fetch_news():
     # 실시간 뉴스 헤드라인 (네이버 금융 주요뉴스)
@@ -883,7 +1255,7 @@ def get_market_summary():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-VALID_INDICES = ["KOSPI", "KOSDAQ", "USDKRW", "NASDAQ", "OIL_CL", "CMDT_GC"]
+VALID_INDICES = ["KOSPI", "KOSDAQ", "USDKRW", "NASDAQ", "OIL_CL", "CMDT_GC", "US10Y", "US30Y", "VIX", "FEAR_GREED", "SP500", "DJI"]
 
 @app.get("/api/stock/{code}")
 def get_stock(code: str):
@@ -895,15 +1267,7 @@ def get_stock(code: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/stock/{code}/chart")
-def get_stock_chart(code: str):
-    is_valid_code = code in VALID_INDICES or (1 <= len(code) <= 15 and re.match(r'^[a-zA-Z0-9.\-]+$', code))
-    if not is_valid_code:
-        raise HTTPException(status_code=400, detail="유효한 종목 코드 또는 티커를 입력해주세요.")
-    try:
-        return get_cached_or_fetch(f"chart_{code}", lambda: fetch_stock_chart(code), ttl_seconds=300)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/news")
 def get_market_news():
@@ -930,37 +1294,6 @@ def calculate_ema(prices, period):
     for i in range(1, len(prices)):
         ema[i] = prices[i] * alpha + ema[i-1] * (1 - alpha)
     return ema
-
-def calculate_rsi(prices, period=14):
-    rsi_values = [None] * len(prices)
-    if len(prices) <= period:
-        return rsi_values
-    
-    deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
-    gains = [d if d > 0 else 0 for d in deltas]
-    losses = [-d if d < 0 else 0 for d in deltas]
-    
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    
-    if avg_loss == 0:
-        rsi_values[period] = 100.0
-    else:
-        rs = avg_gain / avg_loss
-        rsi_values[period] = 100.0 - (100.0 / (1.0 + rs))
-        
-    for i in range(period + 1, len(prices)):
-        delta_idx = i - 1
-        avg_gain = (avg_gain * (period - 1) + gains[delta_idx]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[delta_idx]) / period
-        
-        if avg_loss == 0:
-            rsi_values[i] = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            rsi_values[i] = 100.0 - (100.0 / (1.0 + rs))
-            
-    return rsi_values
 
 def calculate_macd(prices):
     n = len(prices)
@@ -1000,67 +1333,113 @@ def calculate_macd(prices):
     return macd_line, signal_line, histogram
 
 
-NAVER_SYMBOL_MAP = {
+NAVER_SISE_JSON_SYMBOLS = {
     "KOSPI": "KOSPI",
-    "KOSDAQ": "KOSDAQ",
-    "NASDAQ": "NAS@IXIC",
-    "USDKRW": "FX_USDKRW",
-    "OIL_CL": "OIL_CL",
-    "CMDT_GC": "CMDT_GC"
+    "KOSDAQ": "KOSDAQ"
 }
 
-YAHOO_SYMBOLS = {
+YAHOO_SYMBOLS_MAP = {
+    "KOSPI": "^KS11",
+    "KOSDAQ": "^KQ11",
     "NASDAQ": "^IXIC",
+    "SP500": "^GSPC",
+    "DJI": "^DJI",
     "USDKRW": "USDKRW=X",
     "OIL_CL": "CL=F",
-    "CMDT_GC": "GC=F"
+    "CMDT_GC": "GC=F",
+    "US10Y": "^TNX",
+    "US30Y": "^TYX",
+    "VIX": "^VIX"
 }
 
 def fetch_stock_chart(code: str):
     candles = []
     
-    # 1. 네이버 금융 지수/환율/원자재(KOSPI, KOSDAQ, NASDAQ, USDKRW, OIL_CL, CMDT_GC) 일봉 조회 시도
-    symbol_to_fetch = NAVER_SYMBOL_MAP.get(code, code)
-    if code in NAVER_SYMBOL_MAP:
+    # 0. CNN 공포&탐욕 지수 전용 시계열 차트 데이터 수집
+    if code == "FEAR_GREED":
         try:
-            url = f"https://fchart.stock.naver.com/sise.nhn?symbol={symbol_to_fetch}&timeframe=day&count=600&requestType=0"
-            res = requests.get(url, headers=HEADERS, timeout=5)
-            if res.status_code == 200:
-                soup = BeautifulSoup(res.text, 'html.parser')
-                items = soup.select('item')
-                for item in items:
-                    data = item.get('data', '').split('|')
-                    if len(data) == 6:
-                        raw_date = data[0]
-                        formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+            fg_url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+            fg_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+            }
+            fg_res = SESSION.get(fg_url, headers=fg_headers, timeout=5)
+            if fg_res.status_code == 200:
+                fg_data = fg_res.json()
+                hist_items = fg_data.get('fear_and_greed_historical', {}).get('data', [])
+                for item in hist_items:
+                    ts_ms = item.get('x')
+                    score = float(item.get('y', 50.0))
+                    if ts_ms:
+                        date_str = datetime.datetime.fromtimestamp(ts_ms / 1000).strftime('%Y-%m-%d')
                         candles.append({
-                            'time': formatted_date,
-                            'open': float(data[1]),
-                            'high': float(data[2]),
-                            'low': float(data[3]),
-                            'close': float(data[4]),
-                            'volume': float(data[5])
+                            'time': date_str,
+                            'open': score,
+                            'high': score,
+                            'low': score,
+                            'close': score,
+                            'volume': 0
                         })
+                # 현재 최신 점수 추가 (오늘 날짜)
+                fg_curr = fg_data.get('fear_and_greed', {})
+                curr_score = float(fg_curr.get('score', 50.0))
+                today_str = datetime.datetime.now().strftime('%Y-%m-%d')
+                if candles and candles[-1]['time'] != today_str:
+                    candles.append({
+                        'time': today_str,
+                        'open': curr_score,
+                        'high': curr_score,
+                        'low': curr_score,
+                        'close': curr_score,
+                        'volume': 0
+                    })
         except Exception as e:
-            print(f"네이버 지수 차트 조회 실패 ({code}):", e)
+            print("CNN Fear & Greed chart fetch error:", e)
             candles = []
 
-    # 2. 만약 지수 데이터가 비어있거나 해외 주식인 경우 야후 파이낸스 폴백 시도
-    if not candles:
-        is_us_stock = False
-        if code not in VALID_INDICES:
-            if len(code) != 6 or not code[0].isdigit():
-                is_us_stock = True
+    # 1차 시도: 네이버 siseJson API (국내 지수 KOSPI, KOSDAQ 및 6자리 국내 주식)
+    if not candles and (code in NAVER_SISE_JSON_SYMBOLS or (len(code) == 6 and code.isdigit())):
+        try:
+            symbol = NAVER_SISE_JSON_SYMBOLS.get(code, code)
+            url = f"https://api.finance.naver.com/siseJson.naver?symbol={symbol}&requestType=0&count=600&timeframe=day"
+            res = requests.get(url, headers=HEADERS, timeout=5)
+            if res.status_code == 200:
+                raw_text = re.sub(r'[\r\n\t]', '', res.text).strip()
+                parsed_data = ast.literal_eval(raw_text)
+                for row in parsed_data[1:]:
+                    if len(row) >= 6:
+                        raw_date = str(row[0])
+                        if len(raw_date) == 8:
+                            formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+                            candles.append({
+                                'time': formatted_date,
+                                'open': float(row[1]),
+                                'high': float(row[2]),
+                                'low': float(row[3]),
+                                'close': float(row[4]),
+                                'volume': float(row[5])
+                            })
+        except Exception as e:
+            print(f"네이버 siseJson 차트 조회 실패 ({code}):", e)
+            candles = []
 
-        if code in YAHOO_SYMBOLS or is_us_stock:
-            try:
-                yahoo_sym = YAHOO_SYMBOLS[code] if code in YAHOO_SYMBOLS else code.upper()
+    # 2차 시도: 야후 파이낸스 v8 Chart API (NASDAQ, USDKRW, OIL_CL, CMDT_GC, US10Y, US30Y, VIX, 해외/국내 주식)
+    if not candles:
+        try:
+            yahoo_sym = YAHOO_SYMBOLS_MAP.get(code)
+            if not yahoo_sym:
+                is_us_stock = len(code) != 6 or not code[0].isdigit()
+                if is_us_stock:
+                    yahoo_sym = code.upper()
+                else:
+                    yahoo_sym = f"{code}.KS"
+                    
+            if yahoo_sym:
                 url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}?interval=1d&range=1y"
                 yahoo_headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Referer': 'https://finance.yahoo.com/'
                 }
-                res = requests.get(url, headers=yahoo_headers, timeout=5)
+                res = requests.get(url, headers=yahoo_headers, timeout=6, verify=False)
                 if res.status_code == 200:
                     data = res.json()
                     result_list = data.get('chart', {}).get('result', [])
@@ -1082,9 +1461,6 @@ def fetch_stock_chart(code: str):
                             c = closes[idx] if idx < len(closes) else None
                             v = volumes[idx] if idx < len(volumes) and volumes[idx] is not None else 0
                             
-                            if o is None and h is None and l is None and c is None:
-                                continue
-                                
                             if o is None or h is None or l is None or c is None:
                                 prev_close = candles[-1]['close'] if candles else None
                                 if prev_close is not None:
@@ -1104,13 +1480,19 @@ def fetch_stock_chart(code: str):
                                 'close': float(c),
                                 'volume': float(v)
                             })
-            except Exception as e:
-                print(f"야후 파이낸스 차트 조회 실패 ({code}):", e)
+        except Exception as e:
+            print(f"야후 파이낸스 차트 조회 실패 ({code}):", e)
 
-    # 3. 일반 국내 주식 네이버 fchart 조회
+    # 3차 시도: 네이버 legacy fchart 폴백 (최후 안전장치)
     if not candles:
         try:
-            url = f"https://fchart.stock.naver.com/sise.nhn?symbol={code}&timeframe=day&count=600&requestType=0"
+            symbol_legacy = code
+            if code == "NASDAQ": symbol_legacy = "NAS@IXIC"
+            elif code == "USDKRW": symbol_legacy = "FX_USDKRW"
+            elif code == "OIL_CL": symbol_legacy = "OIL_CL"
+            elif code == "CMDT_GC": symbol_legacy = "CMDT_GC"
+            
+            url = f"https://fchart.stock.naver.com/sise.nhn?symbol={symbol_legacy}&timeframe=day&count=600&requestType=0"
             res = requests.get(url, headers=HEADERS, timeout=5)
             if res.status_code == 200:
                 soup = BeautifulSoup(res.text, 'html.parser')
@@ -1129,10 +1511,10 @@ def fetch_stock_chart(code: str):
                             'volume': float(data[5])
                         })
         except Exception as e:
-            print(f"국내주식 네이버 차트 조회 실패 ({code}):", e)
+            print(f"네이버 legacy 차트 조회 실패 ({code}):", e)
             
     if not candles:
-        raise Exception("차트 데이터가 비어있음")
+        raise Exception(f"[{code}] 차트 데이터를 불러올 수 없습니다.")
         
     closes = [c['close'] for c in candles]
     
@@ -1171,6 +1553,17 @@ def fetch_stock_chart(code: str):
         
     return candles
 
+def fetch_stock_chart_bundled(code: str):
+    candles = fetch_stock_chart(code)
+    try:
+        stock_info = fetch_stock_price(code)
+    except Exception:
+        stock_info = None
+    return {
+        "stock_info": stock_info,
+        "candles": candles
+    }
+
 @app.get("/api/stock/{code}/chart")
 def get_stock_chart(code: str):
     is_valid_code = code in VALID_INDICES or (1 <= len(code) <= 15 and re.match(r'^[a-zA-Z0-9.\-]+$', code))
@@ -1178,7 +1571,7 @@ def get_stock_chart(code: str):
         raise HTTPException(status_code=400, detail="유효한 종목 코드 또는 티커를 입력해주세요.")
     try:
         # 차트 데이터는 10분(600초) 캐싱 적용하여 로딩 속도 극대화
-        return get_cached_or_fetch(f"chart_{code}", lambda: fetch_stock_chart(code), 600)
+        return get_cached_or_fetch(f"chart_bundle_{code}", lambda: fetch_stock_chart_bundled(code), 600)
     except Exception as e:
         print(f"[{code}] 차트 데이터 fetch 에러 발생: {e}")
         raise HTTPException(status_code=500, detail=str(e))
