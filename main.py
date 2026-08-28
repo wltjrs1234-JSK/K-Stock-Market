@@ -662,33 +662,36 @@ def calculate_rsi(prices, period=14):
     return rsi_values
 
 
-def fetch_stock_rsi_cached(code: str):
+def fetch_stock_metrics_cached(code: str):
     """
-    종목 코드 또는 지수에 대한 최근 RSI(14) 값을 계산하여 반환 (300초 캐싱)
+    종목 코드 또는 지수에 대한 최근 RSI(14), 전체 기간 최고가(high_max), 고점 대비 하락률(high_drop_rate) 계산 (300초 캐싱)
     """
     def _calculate():
         try:
             closes = []
+            highs = []
             # 1. 국내 종목 (6자리 숫자)
             if len(code) == 6 and code.isdigit():
-                url = f"https://api.finance.naver.com/siseJson.naver?symbol={code}&requestType=0&count=40&timeframe=day"
-                res = requests.get(url, headers=HEADERS, timeout=3)
+                url = f"https://api.finance.naver.com/siseJson.naver?symbol={code}&requestType=0&count=3000&timeframe=day"
+                res = requests.get(url, headers=HEADERS, timeout=4)
                 if res.status_code == 200:
                     raw_text = re.sub(r'[\r\n\t]', '', res.text).strip()
                     parsed_data = ast.literal_eval(raw_text)
                     for row in parsed_data[1:]:
                         if len(row) >= 5:
+                            highs.append(float(row[2]))
                             closes.append(float(row[4]))
             # 2. 국내 지수
             elif code in ["KOSPI", "KOSDAQ"]:
                 sym = "KOSPI" if code == "KOSPI" else "KOSDAQ"
-                url = f"https://api.finance.naver.com/siseJson.naver?symbol={sym}&requestType=0&count=40&timeframe=day"
-                res = requests.get(url, headers=HEADERS, timeout=3)
+                url = f"https://api.finance.naver.com/siseJson.naver?symbol={sym}&requestType=0&count=3000&timeframe=day"
+                res = requests.get(url, headers=HEADERS, timeout=4)
                 if res.status_code == 200:
                     raw_text = re.sub(r'[\r\n\t]', '', res.text).strip()
                     parsed_data = ast.literal_eval(raw_text)
                     for row in parsed_data[1:]:
                         if len(row) >= 5:
+                            highs.append(float(row[2]))
                             closes.append(float(row[4]))
             # 3. 미국 주식 및 기타 지수 (야후 파이낸스)
             elif code not in ["FEAR_GREED"]:
@@ -704,26 +707,50 @@ def fetch_stock_rsi_cached(code: str):
                     "VIX": "^VIX"
                 }
                 yahoo_sym = sym_map.get(code, code.upper())
-                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}?interval=1d&range=2mo"
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_sym}?interval=1d&range=max"
                 yahoo_headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
-                res = SESSION.get(url, headers=yahoo_headers, timeout=3)
+                res = SESSION.get(url, headers=yahoo_headers, timeout=4)
                 if res.status_code == 200:
                     res_data = res.json()
                     results = res_data.get('chart', {}).get('result', [])
                     if results:
-                        quote_closes = results[0].get('indicators', {}).get('quote', [{}])[0].get('close', [])
+                        q = results[0].get('indicators', {}).get('quote', [{}])[0]
+                        quote_highs = q.get('high', [])
+                        quote_closes = q.get('close', [])
+                        highs = [float(h) for h in quote_highs if h is not None]
                         closes = [float(c) for c in quote_closes if c is not None]
 
+            rsi_val = None
             if len(closes) >= 15:
                 rsi_vals = calculate_rsi(closes, 14)
                 valid_rsis = [r for r in rsi_vals if r is not None]
                 if valid_rsis:
-                    return round(valid_rsis[-1], 1)
+                    rsi_val = round(valid_rsis[-1], 1)
+            
+            high_max = None
+            high_drop_rate = None
+            if closes and highs:
+                curr_price = closes[-1]
+                high_max = round(max(highs), 2)
+                if high_max > 0:
+                    drop = ((curr_price - high_max) / high_max) * 100
+                    high_drop_rate = round(drop if drop <= 0 else 0.0, 2)
+
+            return {
+                "rsi": rsi_val,
+                "high_max": high_max,
+                "high_drop_rate": high_drop_rate
+            }
         except Exception as e:
             pass
-        return None
+        return {"rsi": None, "high_max": None, "high_drop_rate": None}
 
-    return get_cached_or_fetch(f"stock_rsi_{code}", _calculate, 300)
+    return get_cached_or_fetch(f"stock_metrics_{code}", _calculate, 300)
+
+def fetch_stock_rsi_cached(code: str):
+    metrics = fetch_stock_metrics_cached(code)
+    return metrics.get("rsi")
+
 
 def fetch_us_stock_price(ticker: str):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker.upper()}?interval=1d&range=2d"
@@ -1089,10 +1116,16 @@ def fetch_stock_price(code: str):
     res = _fetch_stock_price_raw(code)
     if isinstance(res, dict):
         try:
-            res["rsi"] = fetch_stock_rsi_cached(code)
+            metrics = fetch_stock_metrics_cached(code)
+            res["rsi"] = metrics.get("rsi")
+            res["high_max"] = metrics.get("high_max")
+            res["high_drop_rate"] = metrics.get("high_drop_rate")
         except Exception:
             res["rsi"] = None
+            res["high_max"] = None
+            res["high_drop_rate"] = None
     return res
+
 
 def fetch_news():
     # 실시간 뉴스 헤드라인 (네이버 금융 주요뉴스)

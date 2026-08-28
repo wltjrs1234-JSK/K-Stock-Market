@@ -775,6 +775,42 @@ function renderRsiBadge(rsi) {
     }
 }
 
+// 고점 대비 하락률(High Drawdown %) 뱃지 렌더링 헬퍼
+function renderHighDropBadge(dropRate) {
+    if (dropRate === undefined || dropRate === null || isNaN(dropRate)) {
+        return '<span class="drop-value-text drop-neutral">-</span>';
+    }
+    const val = parseFloat(dropRate);
+    
+    if (val >= 0) {
+        return `
+            <div class="drop-badge-wrap drop-ath" title="전체 기간 신고가 (고점 도달)">
+                <span class="drop-num font-outfit">0.0%</span>
+                <span class="drop-pill pill-ath">신고가</span>
+            </div>
+        `;
+    } else if (val <= -30) {
+        return `
+            <div class="drop-badge-wrap drop-deep" title="전체 최고가 대비 ${val.toFixed(2)}% 하락 (낙폭 과대)">
+                <span class="drop-num font-outfit">${val.toFixed(1)}%</span>
+                <span class="drop-pill pill-deep">낙폭과대</span>
+            </div>
+        `;
+    } else if (val <= -10) {
+        return `
+            <div class="drop-badge-wrap drop-moderate" title="전체 최고가 대비 ${val.toFixed(2)}% 하락">
+                <span class="drop-num font-outfit">${val.toFixed(1)}%</span>
+            </div>
+        `;
+    } else {
+        return `
+            <div class="drop-badge-wrap drop-mild" title="전체 최고가 대비 ${val.toFixed(2)}% 하락">
+                <span class="drop-num font-outfit">${val.toFixed(1)}%</span>
+            </div>
+        `;
+    }
+}
+
 // 4.2 관심종목 데이터 업데이트
 async function updateWatchlistData() {
     const tbody = document.getElementById('watchlist-tbody');
@@ -923,6 +959,7 @@ async function updateWatchlistData() {
                 </td>
                 <td class="profit-rate-cell ${profitClass}">${profitRateText}</td>
                 <td class="rsi-cell">${renderRsiBadge(stock.rsi)}</td>
+                <td class="high-drop-cell">${renderHighDropBadge(stock.high_drop_rate)}</td>
                 <td class="text-same font-outfit">${stock.volume.toLocaleString()}</td>
                 <td>
                     <button class="btn-delete" data-code="${stock.code}">
@@ -1672,6 +1709,33 @@ function renderStockDetails(stock) {
     document.getElementById('detail-volume').innerText = displayVolume;
     document.getElementById('detail-high').innerText = displayHigh;
     document.getElementById('detail-low').innerText = displayLow;
+
+    // RSI 및 고점대비 정보 업데이트
+    const detailRsiEl = document.getElementById('detail-rsi');
+    if (detailRsiEl) {
+        if (stock.rsi !== null && stock.rsi !== undefined) {
+            detailRsiEl.innerText = stock.rsi.toFixed(1);
+            detailRsiEl.className = 'value ' + (stock.rsi >= 70 ? 'text-up' : stock.rsi <= 30 ? 'text-down' : 'text-same');
+        } else {
+            detailRsiEl.innerText = '-';
+            detailRsiEl.className = 'value text-same';
+        }
+    }
+
+    const detailDropEl = document.getElementById('detail-high-drop');
+    if (detailDropEl) {
+        if (stock.high_drop_rate !== null && stock.high_drop_rate !== undefined) {
+            const val = stock.high_drop_rate;
+            detailDropEl.innerText = val >= 0 ? '0.0% (신고가)' : `${val.toFixed(1)}%`;
+            detailDropEl.className = 'value ' + (val <= -30 ? 'text-down font-bold' : val <= -10 ? 'text-down' : 'text-same');
+            if (stock.high_max) {
+                detailDropEl.title = `전체 기간 최고가: ${stock.high_max.toLocaleString()}`;
+            }
+        } else {
+            detailDropEl.innerText = '-';
+            detailDropEl.className = 'value text-same';
+        }
+    }
 
     // MTS 모바일 차트 헤더 실시간 시세 연동
     const mtsTitle = document.getElementById('chart-stock-title');
@@ -2769,6 +2833,18 @@ function updateStealthIndicators(lastItem) {
         } else {
             detailRsiEl.innerText = '-';
             detailRsiEl.className = 'value text-same';
+        }
+    }
+
+    const detailDropEl = document.getElementById('detail-high-drop');
+    if (detailDropEl && lastItem) {
+        if (lastItem.high_drop_rate !== null && lastItem.high_drop_rate !== undefined) {
+            const val = lastItem.high_drop_rate;
+            detailDropEl.innerText = val >= 0 ? '0.0% (신고가)' : `${val.toFixed(1)}%`;
+            detailDropEl.className = 'value ' + (val <= -30 ? 'text-down font-bold' : val <= -10 ? 'text-down' : 'text-same');
+        } else {
+            detailDropEl.innerText = '-';
+            detailDropEl.className = 'value text-same';
         }
     }
 
